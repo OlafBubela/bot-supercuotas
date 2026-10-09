@@ -1,47 +1,48 @@
-import requests 
-from bs4 import BeautifulSoup 
+import requests
+from bs4 import BeautifulSoup
 import re
 
-token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU" 
-user_id = "865364645" 
+token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
+user_id = "865364645"s
 odds_api_key = "23fbe34384f88b2bf502bc977f1bb24f"
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
-casas = { 
-    "Winamax": "https://www.winamax.es/apuestas-deportivas", 
-    "Paf": "https://www.paf.es/en/sportsbook", 
-    "William Hill": "https://sports.williamhill.es/betting/es-es", 
-    "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas" 
-    }
+casas = {
+    "Winamax": "https://www.winamax.es/apuestas-deportivas",
+    "Paf": "https://www.paf.es/en/sportsbook",
+    "William Hill": "https://sports.williamhill.es/betting/es-es",
+    "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas"
+}
+
 keywords = ['supercuota', 'cuota mejorada', 'boost', 'super cuota', 'megacuota', 'aumento de cuota']
 
-def obtener_cuota_pinnacle(deporte="soccer_spain_liga"): 
-    url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/" 
-    params = { 
-        'apiKey': odds_api_key, 
-        'regions': 'eu', 
-        'markets': 'h2h', 
-        'bookmakers': 'pinnacle' 
-} 
-try: 
-    res = requests.get(url, params=params) 
-    if res.status_code == 200: 
-        return res.json() 
-except Exception as e: 
-    print(f"Error consultando Odds API: {e}") 
+def obtener_cuota_pinnacle(deporte="soccer_spain_liga"):
+    url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/"
+    params = {
+        'apiKey': odds_api_key,
+        'regions': 'eu',
+        'markets': 'h2h',
+        'bookmakers': 'pinnacle'
+    }
+    try:
+        res = requests.get(url, params=params)
+        if res.status_code == 200:
+            return res.json()
+    except Exception as e:
+        print(f"Error consultando Odds API: {e}")
     return None
 
-def calcular_ev(supercuota, cuota_justa): 
-    probabilidad_real = 1 / cuota_justa 
-    ev = (probabilidad_real * supercuota) - 1 
+def calcular_ev(supercuota, cuota_justa):
+    probabilidad_real = 1 / cuota_justa
+    ev = (probabilidad_real * supercuota) - 1
     return round(ev * 100, 2)
 
 print("🤖 Comprobando supercuotas y analizando +EV...")
 
-for nombre_casa, url in casas.items(): 
-    try: 
-        res = requests.get(url, headers=headers, timeout=10) 
+for nombre_casa, url in casas.items():
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(res.text, 'html.parser')
 
         promociones = []
@@ -54,7 +55,7 @@ for nombre_casa, url in casas.items():
                         supercuota_val = float(numeros[-1].replace(',', '.'))
                         cuota_mercado_estimada = supercuota_val * 0.75
                         ev_porcentaje = calcular_ev(supercuota_val, cuota_mercado_estimada)
-                    
+                        
                         if ev_porcentaje > 0:
                             texto_ev = f"{texto} 📈 **(+EV: +{ev_porcentaje}%)**"
                             promociones.append(texto_ev)
