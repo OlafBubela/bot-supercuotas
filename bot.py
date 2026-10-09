@@ -4,7 +4,7 @@ import re
 
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU" 
 user_id = "865364645" 
-odds_api_key ="23fbe34384f88b2bf502bc977f1bb24f"  # Pón aquí la API Key de The Odds API
+odds_api_key = "23fbe34384f88b2bf502bc977f1bb24f"
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
@@ -14,7 +14,6 @@ casas = {
     "William Hill": "https://sports.williamhill.es/betting/es-es", 
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas" 
 }
-
 keywords = ['supercuota', 'cuota mejorada', 'boost', 'super cuota', 'megacuota', 'aumento de cuota']
 
 def obtener_cuota_pinnacle(deporte="soccer_spain_liga"): 
@@ -36,7 +35,7 @@ def obtener_cuota_pinnacle(deporte="soccer_spain_liga"):
 def calcular_ev(supercuota, cuota_justa): 
     probabilidad_real = 1 / cuota_justa 
     ev = (probabilidad_real * supercuota) - 1 
-    return round(ev * 100, 2) 
+    return round(ev * 100, 2)
 
 print("🤖 Comprobando supercuotas y analizando +EV...")
 
@@ -45,32 +44,33 @@ for nombre_casa, url in casas.items():
         res = requests.get(url, headers=headers, timeout=10) 
         soup = BeautifulSoup(res.text, 'html.parser')
 
-          promociones = []
-          for elemento in soup.find_all(['span', 'div', 'a', 'h3']):
-              texto = elemento.get_text(strip=True)
-              if any(palabra in texto.lower() for palabra in keywords):
-                  if texto not in promociones and len(texto) < 150:
-                      numeros = re.findall(r'\b\d+[\.,]\d+\b', texto)
-                      if numeros:
-                          supercuota_val = float(numeros[-1].replace(',', '.'))
-                          cuota_mercado_estimada = supercuota_val * 0.75
-                          ev_porcentaje = calcular_ev(supercuota_val, cuota_mercado_estimada)
+
+    promociones = []
+    for elemento in soup.find_all(['span', 'div', 'a', 'h3']):
+        texto = elemento.get_text(strip=True)
+        if any(palabra in texto.lower() for palabra in keywords):
+            if texto not in promociones and len(texto) < 150:
+                numeros = re.findall(r'\b\d+[\.,]\d+\b', texto)
+                if numeros:
+                    supercuota_val = float(numeros[-1].replace(',', '.'))
+                    cuota_mercado_estimada = supercuota_val * 0.75
+                    ev_porcentaje = calcular_ev(supercuota_val, cuota_mercado_estimada)
                     
-                          if ev_porcentaje > 0:
-                              texto_ev = f"{texto} 📈 **(+EV: +{ev_porcentaje}%)**"
-                              promociones.append(texto_ev)
-                          else:
-                              promociones.append(f"{texto} 📉 (Sin valor positivo / -EV)")
-                      else:
-                          promociones.append(texto)
+                    if ev_porcentaje > 0:
+                        texto_ev = f"{texto} 📈 **(+EV: +{ev_porcentaje}%)**"
+                        promociones.append(texto_ev)
+                    else:
+                        promociones.append(f"{texto} 📉 (Sin valor positivo / -EV)")
+                else:
+                    promociones.append(texto)
 
-           if promociones:
-               mensaje = f"🔥 **SUPERCUOTAS / +EV DETECTADAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
-               url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
-               requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
-               print(f"Alerta enviada para {nombre_casa}.")
-          else:
-               print(f"{nombre_casa}: sin supercuotas activas.")
+    if promociones:
+        mensaje = f"🔥 **SUPERCUOTAS / +EV DETECTADAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
+        url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
+        requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
+        print(f"Alerta enviada para {nombre_casa}.")
+    else:
+        print(f"{nombre_casa}: sin supercuotas activas.")
 
-      except Exception as e:
-          print(f"Error en {nombre_casa}: {e}")
+except Exception as e:
+    print(f"Error en {nombre_casa}: {e}")
