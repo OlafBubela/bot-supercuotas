@@ -16,13 +16,17 @@ casas = {
     "Bet365": "https://www.bet365.es/#/HO/",
     "Winamax": "https://www.winamax.es/apuestas-deportivas",
     "William Hill": "https://sports.williamhill.es/betting/es-es",
-    "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas"
+    "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas",
+    "Betway": "https://betway.es/es/sports",
+    "Betfair": "https://www.betfair.es/sport/football",
+    "Bwin": "https://sports.bwin.es/es/sports",
+    "Casino Gran Madrid": "https://www.casinogranmadridonline.es/apuestas-deportivas/"
 }
 
 keywords = [
     'supercuota', 'cuota mejorada', 'boost', 'super cuota', 
     'megacuota', 'aumento de cuota', 'aumento de apuesta', 
-    'superaumento', 'mejorada', 'especiales'
+    'superaumento', 'mejorada', 'especiales', 'superprecio', 'combipartido mejorado'
 ]
 
 def obtener_cuota_pinnacle(deporte="soccer_spain_liga"):
