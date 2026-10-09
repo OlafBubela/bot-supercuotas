@@ -49,21 +49,20 @@ for nombre_casa, url in casas.items():
         for elemento in soup.find_all(['span', 'div', 'a', 'h3']):
             texto = elemento.get_text(strip=True)
             if any(palabra in texto.lower() for palabra in keywords):
-               if texto not in promociones and len(texto) < 150:
-                
-                   numeros = re.findall(r'\b\d+[\.,]\d+\b', texto)
-                   if numeros:
-                       supercuota_val = float(numeros[-1].replace(',', '.'))
-                       cuota_mercado_estimada = supercuota_val * 0.75  
-                       ev_porcentaje = calcular_ev(supercuota_val, cuota_mercado_estimada)
+                if texto not in promociones and len(texto) < 150:
+                    numeros = re.findall(r'\b\d+[\.,]\d+\b', texto)
+                    if numeros:
+                        supercuota_val = float(numeros[-1].replace(',', '.'))
+                        cuota_mercado_estimada = supercuota_val * 0.75  
+                        ev_porcentaje = calcular_ev(supercuota_val, cuota_mercado_estimada)
                     
-                       if ev_porcentaje > 0:
-                           texto_ev = f"{texto} 📈 **(+EV: +{ev_porcentaje}%)**"
-                           promociones.append(texto_ev)
-                       else:
-                           promociones.append(f"{texto} 📉 (Sin valor positivo / -EV)")
-                   else:
-                       promociones.append(texto)
+                        if ev_porcentaje > 0:
+                            texto_ev = f"{texto} 📈 **(+EV: +{ev_porcentaje}%)**"
+                            promociones.append(texto_ev)
+                        else:
+                            promociones.append(f"{texto} 📉 (Sin valor positivo / -EV)")
+                    else:
+                        promociones.append(texto)
 
         if promociones:
             mensaje = f"🔥 **SUPERCUOTAS / +EV DETECTADAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
