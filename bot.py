@@ -20,7 +20,9 @@ casas = {
 keywords = [
     'supercuota', 'cuota mejorada', 'boost', 'super cuota', 
     'megacuota', 'aumento de cuota', 'aumento de apuesta', 
-    'superaumento', 'mejorada', 'especiales', 'superprecio'
+    'superaumento', 'aumento', 'mejorada', 'especiales', 
+    'superprecio', 'cuota aumentada', 'aumento de ganancias',
+    'cuota épica', 'cuotas insuperables', 'épica', 'insuperable'
 ]
 
 def calcular_ev(supercuota, cuota_justa):
@@ -48,16 +50,15 @@ async def rastrear():
         )
         page = await context.new_page()
 
-        # Bloquear imágenes pesadas e imprevistos de red para acelerar la carga sin perder elementos
+        # Intercepta y bloquea multimedia pesada para acelerar la carga sin perder contenido relevante
         await page.route("**/*.{png,jpg,jpeg,svg,webp,mp4,woff,woff2}", lambda route: route.abort())
 
         print("🤖 Comprobando supercuotas y generando capturas de pantalla...")
 
         for nombre_casa, url in casas.items():
             try:
-                # Carga hasta que el DOM base esté listo
                 await page.goto(url, timeout=20000, wait_until="domcontentloaded")
-                await page.wait_for_timeout(2000)  # Espera activa para que ejecute el JS de las cuotas
+                await page.wait_for_timeout(2000)
 
                 elementos = await page.query_selector_all('span, div, a, h3, p')
                 
