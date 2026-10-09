@@ -47,30 +47,30 @@ try:
 
       promociones = []
       for elemento in soup.find_all(['span', 'div', 'a', 'h3']):
-        texto = elemento.get_text(strip=True)
-        if any(palabra in texto.lower() for palabra in keywords):
-            if texto not in promociones and len(texto) < 150:
-                numeros = re.findall(r'\b\d+[\.,]\d+\b', texto)
-                if numeros:
-                    supercuota_val = float(numeros[-1].replace(',', '.'))
-                    cuota_mercado_estimada = supercuota_val * 0.75
-                    ev_porcentaje = calcular_ev(supercuota_val, cuota_mercado_estimada)
+          texto = elemento.get_text(strip=True)
+          if any(palabra in texto.lower() for palabra in keywords):
+              if texto not in promociones and len(texto) < 150:
+                  numeros = re.findall(r'\b\d+[\.,]\d+\b', texto)
+                  if numeros:
+                      supercuota_val = float(numeros[-1].replace(',', '.'))
+                      cuota_mercado_estimada = supercuota_val * 0.75
+                      ev_porcentaje = calcular_ev(supercuota_val, cuota_mercado_estimada)
                     
-                    if ev_porcentaje > 0:
-                        texto_ev = f"{texto} 📈 **(+EV: +{ev_porcentaje}%)**"
-                        promociones.append(texto_ev)
-                    else:
-                        promociones.append(f"{texto} 📉 (Sin valor positivo / -EV)")
-                else:
-                    promociones.append(texto)
+                      if ev_porcentaje > 0:
+                          texto_ev = f"{texto} 📈 **(+EV: +{ev_porcentaje}%)**"
+                          promociones.append(texto_ev)
+                      else:
+                          promociones.append(f"{texto} 📉 (Sin valor positivo / -EV)")
+                  else:
+                      promociones.append(texto)
 
-    if promociones:
-        mensaje = f"🔥 **SUPERCUOTAS / +EV DETECTADAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
-        url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
-        requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
-        print(f"Alerta enviada para {nombre_casa}.")
-    else:
-        print(f"{nombre_casa}: sin supercuotas activas.")
+      if promociones:
+          mensaje = f"🔥 **SUPERCUOTAS / +EV DETECTADAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
+          url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
+          requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
+          print(f"Alerta enviada para {nombre_casa}.")
+      else:
+          print(f"{nombre_casa}: sin supercuotas activas.")
 
-except Exception as e:
-    print(f"Error en {nombre_casa}: {e}")
+  except Exception as e:
+      print(f"Error en {nombre_casa}: {e}")
