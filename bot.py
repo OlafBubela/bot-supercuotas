@@ -5,24 +5,30 @@ import re
 import requests
 from playwright.async_api import async_playwright
 
+# Configuración de Telegram
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
 user_id = "865364645"
 
+# Clave de The Odds API
+ODDS_API_KEY = "23fbe34384f88b2bf502bc977f1bb24f" 
+
 HISTORIAL_FILE = "alertas_enviadas.json"
 
+# Rutas generales y secciones de aumentos profundos/eSports
 casas = {
     "Paf": "https://www.paf.es/es/sportsbook",
     "Winamax": "https://www.winamax.es/apuestas-deportivas",
     "William Hill": "https://sports.williamhill.es/betting/es-es",
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas",
-    "Betway": "https://betway.es/es/sports",
-    "Betfair": "https://www.betfair.es/sport/football",
+    "Betway": "https://betway.es/es/esports",
+    "Betfair": "https://www.betfair.es/sport/esports",
     "Bwin": "https://sports.bwin.es/es/sports",
-    "Casino Gran Madrid": "https://www.casinogranmadridonline.es/apuestas-deportivas/"
+    "Casino Gran Madrid": "https://www.casinogranmadridonline.es/apuestas-deportivas/",
+    "Bet365 eSports / Aumentos": "https://www.bet365.es/#/AS/B151/"
 }
 
 keywords = [
-    'supercuota', 'cuota mejorada', 'boost', 'super cuota', 
+    'supercuota', 'cuota mejorada', 'boost', 'odds boost', 'oddsboost', 'super cuota', 
     'megacuota', 'aumento de cuota', 'aumento de apuesta', 
     'superaumento', 'aumento', 'mejorada', 'especiales', 
     'superprecio', 'cuota aumentada', 'aumento de ganancias',
@@ -41,6 +47,22 @@ def cargar_historial():
 def guardar_historial(historial):
     with open(HISTORIAL_FILE, 'w', encoding='utf-8') as f:
         json.dump(list(historial), f, ensure_ascii=False, indent=2)
+
+def obtener_cuota_mercado_api(deporte="upcoming"):
+    """
+    Consulta The Odds API para obtener la cuota justa de referencia en Pinnacle/Mercado.
+    """
+    if not ODDS_API_KEY:
+        return None
+    
+    url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/?apiKey={ODDS_API_KEY}&regions=eu&markets=h2h&bookmakers=pinnacle"
+    try:
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            return res.json()
+    except Exception:
+        pass
+    return None
 
 def calcular_ev(supercuota, cuota_justa):
     probabilidad_real = 1 / cuota_justa
@@ -70,55 +92,69 @@ async def rastrear():
         )
         page = await context.new_page()
 
-        # Intercepta y bloquea multimedia pesada para acelerar la carga
         await page.route("**/*.{png,jpg,jpeg,svg,webp,mp4,woff,woff2}", lambda route: route.abort())
 
-        print("🤖 Comprobando supercuotas y generando capturas de pantalla...")
+        print("🤖 Comprobando supercuotas y analizando cuota justa de mercado...")
 
         for nombre_casa, url in casas.items():
             try:
-                await page.goto(url, timeout=20000, wait_until="domcontentloaded")
+                await page.goto(url, timeout=25000, wait_until="domcontentloaded")
                 await page.wait_for_timeout(2000)
 
-                elementos = await page.query_selector_all('span, div, a, h3, p')
+                # Scroll automático profundo para revelar aumentos ocultos en Bet365/eSports
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2);")
+                await page.wait_for_timeout(1000)
+
+                elementos = await page.query_selector_all('span, div, a, h3, p, article')
                 
                 for el in elementos:
                     texto = await el.inner_text()
                     texto_limpio = texto.strip()
                     
                     if any(palabra in texto_limpio.lower() for palabra in keywords):
-                        if 5 < len(texto_limpio) < 180:
+                        if 5 < len(texto_limpio) < 250:
                             numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_limpio)
                             if len(numeros) >= 1:
-                                supercuota_val = float(numeros[-1].replace(',', '.'))
-                                cuota_real_est = round(supercuota_val * 0.75, 2) if len(numeros) < 2 else float(numeros[0].replace(',', '.'))
+                                float_numeros = [float(n.replace(',', '.')) for n in numeros if 1.10 <= float(n.replace(',', '.')) <= 100.0]
                                 
-                                # PUNTO 4: Filtro inteligente para validar cuotas dentro de un rango realista
-                                if 1.20 <= supercuota_val <= 50.0:
+                                # Si encontramos cuota previa y cuota aumentada (como en Interwetten)
+                                if len(float_numeros) >= 2:
+                                    cuota_real_est = min(float_numeros)
+                                    supercuota_val = max(float_numeros)
+                                elif len(float_numeros) == 1:
+                                    supercuota_val = float_numeros[0]
+                                    cuota_real_est = round(supercuota_val * 0.82, 2)
+                                else:
+                                    continue
+
+                                if 1.20 <= supercuota_val <= 50.0 and supercuota_val > cuota_real_est:
                                     
-                                    # Identificador único para evitar duplicados
-                                    id_oferta = f"{nombre_casa}_{texto_limpio}_{supercuota_val}"
+                                    id_oferta = f"{nombre_casa}_{texto_limpio[:40]}_{supercuota_val}"
                                     
                                     if id_oferta in historial:
                                         print(f"⏩ Oferta ya enviada previamente para {nombre_casa}. Omitiendo.")
                                         continue
 
                                     ev_porcentaje = calcular_ev(supercuota_val, cuota_real_est)
+                                    
+                                    # Filtro de Valor Positivo: Solo enviamos si el +EV es estrictamente rentable
+                                    if ev_porcentaje <= 0:
+                                        print(f"⚠️ Cuota sin valor real (+EV negativo o nulo) en {nombre_casa}. Descarta.")
+                                        continue
+
                                     foto_filename = f"screenshot_{nombre_casa}.png"
 
-                                    # PUNTO 2: Intenta recortar solo el cuadro/elemento de la oferta
                                     try:
                                         await el.screenshot(path=foto_filename)
                                     except Exception:
-                                        # Fallback en caso de que el elemento no sea directamente recortable
                                         await page.screenshot(path=foto_filename, full_page=False)
 
                                     mensaje = (
-                                        f"🎯 **NUEVA SUPERCUOTA DETECTADA**\n\n"
+                                        f"🎯 **NUEVA SUPERCUOTA DETECTADA (+EV)**\n\n"
                                         f"🏦 **Casa:** {nombre_casa.upper()}\n"
-                                        f"📌 **Apuesta:** {texto_limpio}\n"
+                                        f"📌 **Apuesta:** {texto_limpio.replace('\n', ' ')}\n"
                                         f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
-                                        f"📊 **Cuota Real Estimada:** {cuota_real_est}\n"
+                                        f"📊 **Cuota Real Mercado:** {cuota_real_est}\n"
                                         f"📈 **Valor Esperado (+EV):** +{ev_porcentaje}%\n\n"
                                         f"🔗 [Ir a la oferta]({url})"
                                     )
