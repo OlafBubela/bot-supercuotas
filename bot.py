@@ -1,4 +1,3 @@
-import time 
 import requests 
 from bs4 import BeautifulSoup
 
@@ -15,30 +14,28 @@ casas = {
 
 keywords = ['supercuota', 'cuota mejorada', 'boost', 'super cuota', 'megacuota', 'aumento de cuota']
 
-print("🤖 Bot multicasa activado en Render...")
+print("🤖 Comprobando supercuotas...")
 
-while True: 
-    for nombre_casa, url in casas.items(): 
-        try: 
-          res = requests.get(url, headers=headers, timeout=10) 
-          soup = BeautifulSoup(res.text, 'html.parser')
-        
-      promociones = []
-        for elemento in soup.find_all(['span', 'div', 'a', 'h3']):
-            texto = elemento.get_text(strip=True)
-            if any(palabra in texto.lower() for palabra in keywords):
-                if texto not in promociones and len(texto) < 150:
-                    promociones.append(texto)
+for nombre_casa, url in casas.items(): 
+    try: 
+      res = requests.get(url, headers=headers, timeout=10) 
+      soup = BeautifulSoup(res.text, 'html.parser')
 
-        if promociones:
-            mensaje = f"🔥 **SUPERCUOTAS DETECTADAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
-            url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
-            requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
-            print(f"[{time.strftime('%H:%M:%S')}] Alerta enviada para {nombre_casa}.")
-        else:
-            print(f"[{time.strftime('%H:%M:%S')}] {nombre_casa}: sin supercuotas activas.")
+    promociones = []
+    for elemento in soup.find_all(['span', 'div', 'a', 'h3']):
+        texto = elemento.get_text(strip=True)
+        if any(palabra in texto.lower() for palabra in keywords):
+            if texto not in promociones and len(texto) < 150:
+                promociones.append(texto)
 
-    except Exception as e:
-        print(f"[{time.strftime('%H:%M:%S')}] Error en {nombre_casa}: {e}")
-   time.sleep(300)
-time.sleep(300)
+    if promociones:
+        mensaje = f"🔥 **SUPERCUOTAS DETECTADAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
+        url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
+        requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
+        print(f"Alerta enviada para {nombre_casa}.")
+    else:
+        print(f"{nombre_casa}: sin supercuotas activas.")
+
+except Exception as e:
+    print(f"Error en {nombre_casa}: {e}")
+
