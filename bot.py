@@ -43,18 +43,22 @@ async def rastrear():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={'width': 1280, 'height': 800}
         )
         page = await context.new_page()
+
+        # Bloquear imágenes pesadas e imprevistos de red para acelerar la carga sin perder elementos
+        await page.route("**/*.{png,jpg,jpeg,svg,webp,mp4,woff,woff2}", lambda route: route.abort())
 
         print("🤖 Comprobando supercuotas y generando capturas de pantalla...")
 
         for nombre_casa, url in casas.items():
             try:
-                await page.goto(url, timeout=25000, wait_until="domcontentloaded")
-                await page.wait_for_timeout(3000)  # Esperar a que carguen las cuotas dinámicas
+                # Carga hasta que el DOM base esté listo
+                await page.goto(url, timeout=20000, wait_until="domcontentloaded")
+                await page.wait_for_timeout(2000)  # Espera activa para que ejecute el JS de las cuotas
 
-                # Extraer texto de la página
                 elementos = await page.query_selector_all('span, div, a, h3, p')
                 
                 for el in elementos:
@@ -71,7 +75,6 @@ async def rastrear():
                                 if supercuota_val > 1.0:
                                     ev_porcentaje = calcular_ev(supercuota_val, cuota_real_est)
                                     
-                                    # Tomar captura de pantalla de la casa
                                     foto_filename = f"screenshot_{nombre_casa}.png"
                                     await page.screenshot(path=foto_filename, full_page=False)
 
@@ -86,10 +89,10 @@ async def rastrear():
                                     )
 
                                     enviar_telegram_con_foto(mensaje, foto_filename)
-                                    print(f"Alerta con foto enviada para {nombre_casa}.")
+                                    print(f"Alerta enviada para {nombre_casa}.")
                                     break
             except Exception as e:
-                print(f"Error procesando {nombre_casa}: {e}")
+                print(f"Error o tiempo agotado en {nombre_casa}: {e}")
 
         await browser.close()
 
