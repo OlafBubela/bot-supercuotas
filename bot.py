@@ -1,19 +1,13 @@
-import requests
-from bs4 import BeautifulSoup
+import asyncio
 import re
+import requests
+from playwright.async_api import async_playwright
 
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
 user_id = "865364645"
-odds_api_key = "23fbe34384f88b2bf502bc977f1bb24f"
-
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "es-ES,es;q=0.9,en;q=0.8"
-}
 
 casas = {
     "Paf": "https://www.paf.es/es/sportsbook",
-    "Bet365": "https://www.bet365.es/#/HO/",
     "Winamax": "https://www.winamax.es/apuestas-deportivas",
     "William Hill": "https://sports.williamhill.es/betting/es-es",
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas",
@@ -26,65 +20,78 @@ casas = {
 keywords = [
     'supercuota', 'cuota mejorada', 'boost', 'super cuota', 
     'megacuota', 'aumento de cuota', 'aumento de apuesta', 
-    'superaumento', 'mejorada', 'especiales', 'superprecio', 'combipartido mejorado'
+    'superaumento', 'mejorada', 'especiales', 'superprecio'
 ]
-
-def obtener_cuota_pinnacle(deporte="soccer_spain_liga"):
-    url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/"
-    params = {
-        'apiKey': odds_api_key,
-        'regions': 'eu',
-        'markets': 'h2h',
-        'bookmakers': 'pinnacle'
-    }
-    try:
-        res = requests.get(url, params=params, timeout=10)
-        if res.status_code == 200:
-            return res.json()
-    except Exception as e:
-        print(f"Error consultando Odds API: {e}")
-    return None
 
 def calcular_ev(supercuota, cuota_justa):
     probabilidad_real = 1 / cuota_justa
     ev = (probabilidad_real * supercuota) - 1
     return round(ev * 100, 2)
 
-print("🤖 Comprobando supercuotas y analizando promociones...")
+def enviar_telegram_con_foto(mensaje, foto_path):
+    url = f"https://api.telegram.org/bot{token}/sendPhoto"
+    with open(foto_path, 'rb') as photo:
+        payload = {
+            'chat_id': user_id,
+            'caption': mensaje,
+            'parse_mode': 'Markdown'
+        }
+        files = {'photo': photo}
+        requests.post(url, data=payload, files=files)
 
-for nombre_casa, url in casas.items():
-    try:
-        res = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(res.text, 'html.parser')
+async def rastrear():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
 
-        promociones = []
-        for elemento in soup.find_all(['span', 'div', 'a', 'h3', 'p']):
-            texto = elemento.get_text(strip=True)
-            if any(palabra in texto.lower() for palabra in keywords):
-                if texto not in promociones and 5 < len(texto) < 180:
-                    numeros = re.findall(r'\b\d+[\.,]\d+\b', texto)
-                    if numeros:
-                        try:
-                            supercuota_val = float(numeros[-1].replace(',', '.'))
-                            if supercuota_val > 1.0:
-                                cuota_mercado_estimada = supercuota_val * 0.75
-                                ev_porcentaje = calcular_ev(supercuota_val, cuota_mercado_estimada)
-                                texto_ev = f"{texto} ⚡ (Cuota: {supercuota_val} | Est. +EV: +{ev_porcentaje}%)"
-                                promociones.append(texto_ev)
-                            else:
-                                promociones.append(texto)
-                        except Exception:
-                            promociones.append(texto)
-                    else:
-                        promociones.append(texto)
+        print("🤖 Comprobando supercuotas y generando capturas de pantalla...")
 
-        if promociones:
-            mensaje = f"🔥 **OFERTAS / SUPERCUOTAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
-            url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
-            requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
-            print(f"Alerta enviada para {nombre_casa}.")
-        else:
-            print(f"{nombre_casa}: sin supercuotas detectadas.")
+        for nombre_casa, url in casas.items():
+            try:
+                await page.goto(url, timeout=25000, wait_until="domcontentloaded")
+                await page.wait_for_timeout(3000)  # Esperar a que carguen las cuotas dinámicas
 
-    except Exception as e:
-        print(f"Error en {nombre_casa}: {e}")
+                # Extraer texto de la página
+                elementos = await page.query_selector_all('span, div, a, h3, p')
+                
+                for el in elementos:
+                    texto = await el.inner_text()
+                    texto_limpio = texto.strip()
+                    
+                    if any(palabra in texto_limpio.lower() for palabra in keywords):
+                        if 5 < len(texto_limpio) < 180:
+                            numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_limpio)
+                            if len(numeros) >= 1:
+                                supercuota_val = float(numeros[-1].replace(',', '.'))
+                                cuota_real_est = round(supercuota_val * 0.75, 2) if len(numeros) < 2 else float(numeros[0].replace(',', '.'))
+                                
+                                if supercuota_val > 1.0:
+                                    ev_porcentaje = calcular_ev(supercuota_val, cuota_real_est)
+                                    
+                                    # Tomar captura de pantalla de la casa
+                                    foto_filename = f"screenshot_{nombre_casa}.png"
+                                    await page.screenshot(path=foto_filename, full_page=False)
+
+                                    mensaje = (
+                                        f"🎯 **NUEVA SUPERCUOTA DETECTADA**\n\n"
+                                        f"🏦 **Casa:** {nombre_casa.upper()}\n"
+                                        f"📌 **Apuesta:** {texto_limpio}\n"
+                                        f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
+                                        f"📊 **Cuota Real Estimada:** {cuota_real_est}\n"
+                                        f"📈 **Valor Esperado (+EV):** +{ev_porcentaje}%\n\n"
+                                        f"🔗 [Ir a la oferta]({url})"
+                                    )
+
+                                    enviar_telegram_con_foto(mensaje, foto_filename)
+                                    print(f"Alerta con foto enviada para {nombre_casa}.")
+                                    break
+            except Exception as e:
+                print(f"Error procesando {nombre_casa}: {e}")
+
+        await browser.close()
+
+if __name__ == "__main__":
+    asyncio.run(rastrear())
