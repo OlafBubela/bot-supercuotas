@@ -13,12 +13,17 @@ headers = {
 
 casas = {
     "Paf": "https://www.paf.es/es/sportsbook",
+    "Bet365": "https://www.bet365.es/#/HO/",
     "Winamax": "https://www.winamax.es/apuestas-deportivas",
     "William Hill": "https://sports.williamhill.es/betting/es-es",
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas"
 }
 
-keywords = ['supercuota', 'cuota mejorada', 'boost', 'super cuota', 'megacuota', 'aumento de cuota', 'mejorada', 'especiales']
+keywords = [
+    'supercuota', 'cuota mejorada', 'boost', 'super cuota', 
+    'megacuota', 'aumento de cuota', 'aumento de apuesta', 
+    'superaumento', 'mejorada', 'especiales'
+]
 
 def obtener_cuota_pinnacle(deporte="soccer_spain_liga"):
     url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/"
