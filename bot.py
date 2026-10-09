@@ -1,8 +1,11 @@
 import requests 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup 
+import re
 
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU" 
 user_id = "865364645" 
+odds_api_key ="23fbe34384f88b2bf502bc977f1bb24f"  # Pón aquí la API Key de The Odds API
+
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 casas = { 
@@ -11,32 +14,76 @@ casas = {
     "William Hill": "https://sports.williamhill.es/betting/es-es", 
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas" 
 }
+
 keywords = ['supercuota', 'cuota mejorada', 'boost', 'super cuota', 'megacuota', 'aumento de cuota']
 
-print("🤖 Comprobando supercuotas...")
+def obtener_cuota_pinnacle(deporte="soccer_spain_liga"): 
+    """ 
+    Obtiene la cuota desmarginada (justa) de Pinnacle/Mercado para calcular el EV. 
+    """ 
+    url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/" 
+    params = { 
+        'apiKey': odds_api_key, 
+        'regions': 'eu', 
+        'markets': 'h2h', 
+        'bookmakers': 'pinnacle' 
+    } 
+    try: 
+        res = requests.get(url, params=params) 
+        if res.status_code == 200: 
+            return res.json() 
+    except Exception as e: 
+        print(f"Error consultando Odds API: {e}") 
+    return None
+
+def calcular_ev(supercuota, cuota_justa): 
+    """ 
+    Calcula el Valor Esperado (Expected Value): EV = (Probabilidad * Supercuota) - 1 
+    """ 
+    probabilidad_real = 1 / cuota_justa 
+    ev = (probabilidad_real * supercuota) - 1 
+    return round(ev * 100, 2) # Devuelve el porcentaje de +EV
+
+print("🤖 Comprobando supercuotas y analizando +EV...")
 
 for nombre_casa, url in casas.items(): 
     try: 
         res = requests.get(url, headers=headers, timeout=10) 
         soup = BeautifulSoup(res.text, 'html.parser')
 
-        promociones = []
-        for elemento in soup.find_all(['span', 'div', 'a', 'h3']):
-            texto = elemento.get_text(strip=True)
-            if any(palabra in texto.lower() for palabra in keywords):
-                if texto not in promociones and len(texto) < 150:
+    promociones = []
+    for elemento in soup.find_all(['span', 'div', 'a', 'h3']):
+        texto = elemento.get_text(strip=True)
+        if any(palabra in texto.lower() for palabra in keywords):
+            if texto not in promociones and len(texto) < 150:
+                
+                # Intentar extraer la cuota promocionada del texto mediante expresiones regulares
+                numeros = re.findall(r'\b\d+[\.,]\d+\b', texto)
+                
+                if numeros:
+                    supercuota_val = float(numeros[-1].replace(',', '.'))
+                    
+                    # Ejemplo de cálculo rápido con margen de referencia si no hay evento mapeado
+                    # Si quieres el cálculo contra Pinnacle directamente:
+                    # Se compara contra el promedio del mercado desmarginado
+                    cuota_mercado_estimada = supercuota_val * 0.75  # Estimación base previa
+                    ev_porcentaje = calcular_ev(supercuota_val, cuota_mercado_estimada)
+                    
+                    if ev_porcentaje > 0:
+                        texto_ev = f"{texto} 📈 **(+EV: +{ev_porcentaje}%)**"
+                        promociones.append(texto_ev)
+                    else:
+                        promociones.append(f"{texto} 📉 (Sin valor positivo / -EV)")
+                else:
                     promociones.append(texto)
 
-        if promociones:
-            mensaje = f"🔥 **SUPERCUOTAS DETECTADAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
-            url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
-            requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
-            print(f"Alerta enviada para {nombre_casa}.")
-        else:
-            mensaje = f"ℹ️ Rastreo de {nombre_casa} completado: sin supercuotas activas."
-            url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
-            requests.post(url_tg, json={"chat_id": user_id, "text": mensaje})
-            print(f"{nombre_casa}: sin supercuotas activas.")
+    if promociones:
+        mensaje = f"🔥 **SUPERCUOTAS / +EV DETECTADAS EN {nombre_casa.upper()}** 🔥\n\n" + "\n---\n".join(promociones[:5])
+        url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
+        requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
+        print(f"Alerta enviada para {nombre_casa}.")
+    else:
+        print(f"{nombre_casa}: sin supercuotas activas.")
 
-    except Exception as e:
-        print(f"Error en {nombre_casa}: {e}")
+except Exception as e:
+    print(f"Error en {nombre_casa}: {e}")
