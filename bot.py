@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import re
 
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
-user_id = "865364645"s
+user_id = "865364645"
 odds_api_key = "23fbe34384f88b2bf502bc977f1bb24f"
 
 headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
