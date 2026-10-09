@@ -69,7 +69,7 @@ for nombre_casa, url in casas.items():
                url_tg = f"https://api.telegram.org/bot{token}/sendMessage"
                requests.post(url_tg, json={"chat_id": user_id, "text": mensaje, "parse_mode": "Markdown"})
                print(f"Alerta enviada para {nombre_casa}.")
-           else:
+          else:
                print(f"{nombre_casa}: sin supercuotas activas.")
 
       except Exception as e:
