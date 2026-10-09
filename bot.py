@@ -11,7 +11,6 @@ casas = {
   "William Hill": "https://sports.williamhill.es/betting/es-es", 
   "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas" 
 }
-
 keywords = ['supercuota', 'cuota mejorada', 'boost', 'super cuota', 'megacuota', 'aumento de cuota']
 
 print("🤖 Comprobando supercuotas...")
@@ -38,4 +37,3 @@ for nombre_casa, url in casas.items():
 
 except Exception as e:
     print(f"Error en {nombre_casa}: {e}")
-
