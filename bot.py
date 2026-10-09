@@ -149,10 +149,12 @@ async def rastrear():
                                     except Exception:
                                         await page.screenshot(path=foto_filename, full_page=False)
 
+                                    texto_formateado = texto_limpio.replace('\n', ' ')
+
                                     mensaje = (
                                         f"🎯 **NUEVA SUPERCUOTA DETECTADA (+EV)**\n\n"
                                         f"🏦 **Casa:** {nombre_casa.upper()}\n"
-                                        f"📌 **Apuesta:** {texto_limpio.replace('\n', ' ')}\n"
+                                        f"📌 **Apuesta:** {texto_formateado}\n"
                                         f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
                                         f"📊 **Cuota Real Mercado:** {cuota_real_est}\n"
                                         f"📈 **Valor Esperado (+EV):** +{ev_porcentaje}%\n\n"
