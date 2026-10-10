@@ -174,7 +174,6 @@ async def rastrear():
                 viewport={'width': 1280, 'height': 800}
             )
 
-            # Establecer un tiempo límite global por acción de 5 segundos
             page = await context.new_page()
             page.set_default_timeout(5000)
 
@@ -183,11 +182,10 @@ async def rastrear():
             for nombre_casa, url in casas.items():
                 log(f"🔍 Escaneando {nombre_casa} ({url})...")
                 try:
-                    # Límite estricto de 8 segundos para cargar la web inicial
                     await page.goto(url, timeout=8000, wait_until="commit")
                     await page.wait_for_timeout(1000)
 
-                    # Intentar cerrar el banner de cookies sin bloquear si no existe
+                    # Intentar cerrar el banner de cookies
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar y cerrar"), button:has-text("Aceptar")')
                         if cookie_btn:
@@ -197,14 +195,17 @@ async def rastrear():
                     except Exception:
                         pass
 
-                    # Búsqueda en William Hill mediante URL directa (evita clics en la interfaz que congelan)
+                    # Búsqueda en William Hill mediante URL directa + renderizado de 2s
                     if nombre_casa == "William Hill":
                         for termino in TERMINOS_BUSQUEDA_WH:
                             try:
                                 search_url = f"https://sports.williamhill.es/betting/es-es/search?term={termino.replace(' ', '%20')}"
                                 log(f"  🔎 Búsqueda por URL directa: '{termino}'...")
-                                await page.goto(search_url, timeout=8000, wait_until="commit")
-                                await page.wait_for_timeout(1500)
+                                await page.goto(search_url, timeout=8000, wait_until="domcontentloaded")
+                                
+                                # Scroll y espera de 2 segundos para forzar a JavaScript a renderizar las tarjetas
+                                await page.evaluate("window.scrollBy(0, 400);")
+                                await page.wait_for_timeout(2000)
 
                                 alerta_wh = await escaneo_elementos_pagina(page, session, nombre_casa, search_url, historial)
                                 if alerta_wh:
