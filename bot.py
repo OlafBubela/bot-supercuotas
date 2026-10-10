@@ -1,74 +1,167 @@
 import asyncio
+import json
 import os
+import re
 import time
 import aiohttp
 from playwright.async_api import async_playwright
 
+# Configuración de Telegram
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
 user_id = "865364645"
+
+HISTORIAL_FILE = "alertas_definitivo.json"
+SCREENSHOT_PATH = "oferta_detectada.png"
+
+# Enfocado EXCLUSIVAMENTE en Betfair
+CONFIG_BETFAIR = {
+    "url": "https://www.betfair.es/sport/",
+    "keywords": ["supercuota", "supercuotas", "cuota mejorada", "cuotas mejoradas", "precio mejorado", "aumento"],
+    "blacklist": ["combipartido"]
+}
 
 def log(mensaje):
     print(f"[{time.strftime('%H:%M:%S')}] {mensaje}", flush=True)
 
-async def enviar_telegram(session, mensaje, ruta_imagen=None):
+def cargar_historial():
+    if os.path.exists(HISTORIAL_FILE):
+        try:
+            with open(HISTORIAL_FILE, 'r', encoding='utf-8') as f:
+                return set(json.load(f))
+        except Exception:
+            return set()
+    return set()
+
+def guardar_historial(historial):
+    with open(HISTORIAL_FILE, 'w', encoding='utf-8') as f:
+        json.dump(list(historial), f, ensure_ascii=False, indent=2)
+
+def calcular_ev(supercuota, cuota_referencia_base):
+    if cuota_referencia_base <= 1.0:
+        return 0.0
+    probabilidad_real = 1 / cuota_referencia_base
+    ev = (probabilidad_real * supercuota) - 1
+    return round(ev * 100, 2)
+
+def extraer_cuotas_limpias(texto):
+    texto_sin_euros = re.sub(r'\b\d+[\.,]?\d*\s*€', '', texto)
+    numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_sin_euros)
+    cuotas_validas = []
+    for n in numeros:
+        try:
+            val = float(n.replace(',', '.'))
+            if 1.15 <= val <= 25.00:
+                cuotas_validas.append(val)
+        except ValueError:
+            continue
+    return cuotas_validas
+
+async def enviar_telegram_con_foto(session, mensaje, ruta_imagen=None):
     if ruta_imagen and os.path.exists(ruta_imagen):
         url = f"https://api.telegram.org/bot{token}/sendPhoto"
         data = aiohttp.FormData()
         data.add_field('chat_id', user_id)
         data.add_field('caption', mensaje)
-        data.add_field('photo', open(ruta_imagen, 'rb'), filename='debug.png')
+        data.add_field('parse_mode', 'Markdown')
+        data.add_field('photo', open(ruta_imagen, 'rb'), filename='oferta.png')
         try:
             async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=10)):
                 pass
-            log("  ✅ Foto enviada a Telegram con éxito.")
+            if "debug_" not in ruta_imagen:
+                os.remove(ruta_imagen)
             return
         except Exception as e:
-            log(f"  ❌ Error enviando foto: {e}")
+            log(f"Error enviando foto a Telegram: {e}")
 
-async def test_betfair():
+    url_text = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {'chat_id': user_id, 'text': mensaje, 'parse_mode': 'Markdown'}
+    try:
+        async with session.post(url_text, json=payload, timeout=aiohttp.ClientTimeout(total=5)):
+            pass
+    except Exception as e:
+        log(f"Error enviando mensaje a Telegram: {e}")
+
+async def escaneo_betfair(page, session, historial):
+    keywords = CONFIG_BETFAIR["keywords"]
+    blacklist = CONFIG_BETFAIR["blacklist"]
+
+    try:
+        elementos = await page.query_selector_all(
+            'article, section, button, a, [class*="boost"], [class*="promo"], '
+            '[class*="offer"], [class*="runner"], [class*="card"], [class*="banner"], div'
+        )
+        
+        for el in elementos:
+            try:
+                if not await el.is_visible():
+                    continue
+
+                texto = await el.inner_text()
+                texto_limpio = texto.strip()
+                texto_lower = texto_limpio.lower()
+                
+                if any(kw in texto_lower for kw in keywords):
+                    if any(bl in texto_lower for bl in blacklist):
+                        continue
+
+                    if 5 < len(texto_limpio) < 500:
+                        cuotas = extraer_cuotas_limpias(texto_limpio)
+
+                        if len(cuotas) >= 1:
+                            supercuota_val = max(cuotas)
+                            cuota_referencia = min(cuotas) if len(cuotas) > 1 else round(supercuota_val * 0.8, 2)
+
+                            texto_resumen = texto_limpio[:50].replace('\n', ' ')
+                            log(f"  🎯 Oferta detectada en Betfair: '{texto_resumen}...' | Cuota: {supercuota_val}")
+
+                            id_oferta = f"Betfair_{texto_limpio[:20]}_{supercuota_val}"
+                            
+                            if id_oferta in historial:
+                                log(f"  ⏩ Omitida: Ya en historial.")
+                                continue
+
+                            ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
+                            
+                            try:
+                                await el.screenshot(path=SCREENSHOT_PATH)
+                            except Exception:
+                                await page.screenshot(path=SCREENSHOT_PATH)
+
+                            mensaje = (
+                                f"🎯 **NUEVA SUPERCUOTA DETECTADA**\n\n"
+                                f"🏦 **Casa:** BETFAIR\n"
+                                f"📌 **Apuesta:** {texto_limpio.replace(chr(10), ' ')}\n"
+                                f"⚡ **Supercuota:** {supercuota_val}\n"
+                                f"📊 **Cuota Base Ref:** {cuota_referencia}\n"
+                                f"📈 **Valor Esperado (+EV):** +{ev_porcentaje}%\n\n"
+                                f"🔗 [Ir a la oferta]({CONFIG_BETFAIR['url']})"
+                            )
+
+                            await enviar_telegram_con_foto(session, mensaje, SCREENSHOT_PATH)
+                            log(f"  ✅ ¡ALERTA Y CAPTURA ENVIADAS A TELEGRAM!")
+                            historial.add(id_oferta)
+                            return True
+            except Exception:
+                continue
+
+    except Exception as e:
+        log(f"  ⚠️ Error escaneando Betfair: {e}")
+            
+    return False
+
+async def rastrear():
+    historial = cargar_historial()
+
     async with aiohttp.ClientSession() as session:
         async with async_playwright() as p:
-            log("🚀 Lanzando navegador directo a Betfair...")
+            log("🚀 Iniciando rastreo exclusivo para Betfair...")
             browser = await p.chromium.launch(
                 headless=True,
-                args=['--no-sandbox', '--disable-setuid-sandbox']
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox'
+                ]
             )
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-                viewport={'width': 1280, 'height': 800}
-            )
 
-            page = await context.new_page()
-
-            # Bloquear recursos pesados para que cargue al instante
-            await page.route("**/*.{png,jpg,jpeg,svg,gif,webp,ttf,woff,woff2}", lambda route: route.abort())
-
-            try:
-                log("🔍 Navegando a https://www.betfair.es/sport/...")
-                # Cargar solo el HTML inicial sin esperar a la red
-                await page.goto("https://www.betfair.es/sport/", timeout=15000, wait_until="domcontentloaded")
-                await page.wait_for_timeout(3000)
-
-                # Intentar cerrar banner de cookies si existe
-                try:
-                    cookie_btn = await page.query_selector('button:has-text("Aceptar"), #onetrust-accept-btn-handler')
-                    if cookie_btn:
-                        await cookie_btn.click()
-                        await page.wait_for_timeout(1000)
-                except Exception:
-                    pass
-
-                debug_img = "debug_betfair.png"
-                await page.screenshot(path=debug_img, full_page=False)
-                log("📸 Captura de Betfair guardada.")
-
-                await enviar_telegram(session, "📸 **DIAGNÓSTICO BETFAIR DIRECTO**\nEsto es lo que ve el servidor:", debug_img)
-
-            except Exception as e:
-                log(f"❌ Error al cargar Betfair: {e}")
-            finally:
-                await browser.close()
-                log("🏁 Fin de la prueba.")
-
-if __name__ == "__main__":
-    asyncio.run(test_betfair())
+            # Configuración para for
