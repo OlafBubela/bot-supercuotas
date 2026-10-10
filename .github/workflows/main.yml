@@ -1,18 +1,37 @@
-name: Rastrear Supercuotas
+name: Bot Supercuotas
 
 on:
-  workflow_dispatch:
   schedule:
+    # Se ejecuta automáticamente cada 15 minutos
     - cron: '*/15 * * * *'
+  workflow_dispatch: # Permite ejecutarlo manualmente desde la pestaña Actions
 
 jobs:
- run-bot:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
-    - run: pip install -r requirements.txt
-    - run: playwright install --with-deps chromium
-    - run: python bot.py
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Ejecutar bot
+        run: python bot.py
+
+      - name: Guardar cambios en el historial
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add alertas_definitivo.json || true
+          git commit -m "Actualizar historial de alertas" || true
+          git push || true
