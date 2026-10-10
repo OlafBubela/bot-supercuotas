@@ -111,19 +111,15 @@ async def rastrear():
             for nombre_casa, config in CONFIG_CASAS.items():
                 log(f"🔍 Escaneando {nombre_casa}...")
                 try:
-                    # Carga simple sin bloquear la red
                     await page.goto(config['url'], timeout=8000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000)
 
-                    # Hacer un scroll rápido para cargar imágenes/tarjetas
                     await page.evaluate("window.scrollBy(0, 400);")
                     await page.wait_for_timeout(1000)
 
-                    # Obtener TODO el texto visible de la página en 1 sola llamada
                     texto_pagina = await page.evaluate("document.body.innerText")
                     texto_lower = texto_pagina.lower()
 
-                    # Comprobar palabra clave
                     kw_encontrada = None
                     for kw in config["keywords"]:
                         if kw in texto_lower:
@@ -131,15 +127,13 @@ async def rastrear():
                             break
 
                     if kw_encontrada:
-                        # Descartar si hay palabras de la blacklist muy cerca
                         if any(bl in texto_lower for bl in config["blacklist"]):
                             log(f"  ⏩ Omitida en {nombre_casa}: detectada combinación/parlay.")
                             continue
 
-                        # Extraer un fragmento representativo
-                         lineas = [l.strip() for l in texto_pagina.split('\n') if kw_encontrada in l.lower()]
-                         resumen_oferta = lineas[0] if lineas else f"Oferta {kw_encontrada}"
-                         
+                        lineas = [l.strip() for l in texto_pagina.split('\n') if kw_encontrada in l.lower()]
+                        resumen_oferta = lineas[0] if lineas else f"Oferta {kw_encontrada}"
+                        
                         id_oferta = f"{nombre_casa}_{resumen_oferta[:30]}"
                         if id_oferta in historial:
                             log(f"  ⏩ Omitida: Ya notificada anteriormente.")
@@ -147,7 +141,6 @@ async def rastrear():
 
                         log(f"  🎯 ¡OFERTA ENCONTRADA EN {nombre_casa.upper()}!")
 
-                        # Tomar captura completa de la vista
                         await page.screenshot(path=SCREENSHOT_PATH)
 
                         mensaje = (
