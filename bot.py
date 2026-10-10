@@ -10,32 +10,68 @@ from playwright.async_api import async_playwright
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
 user_id = "865364645"
 
-# Clave de The Odds API
-ODDS_API_KEY = "23fbe34384f88b2bf502bc977f1bb24f" 
-
 HISTORIAL_FILE = "alertas_enviadas.json"
+SCREENSHOT_PATH = "oferta_detectada.png"
 
-casas = {
-    "Paf": "https://www.paf.es/es/sportsbook",
-    "Winamax": "https://www.winamax.es/apuestas-deportivas",
-    "William Hill Promos": "https://sports.williamhill.es/betting/es-es/highlights",
-    "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas",
-    "Betway": "https://betway.es/es/esports",
-    "Betfair": "https://www.betfair.es/sport/football",
-    "Bwin": "https://sports.bwin.es/es/sports",
-    "Casino Gran Madrid": "https://www.casinogranmadridonline.es/apuestas-deportivas/",
-    "Bet365 Deportes": "https://www.bet365.es/#/HO/"
+CONFIG_CASAS = {
+    "Bet365 Deportes": {
+        "url": "https://www.bet365.es/#/HO/",
+        "keywords": ["superaumento"],
+        "blacklist": ["parlay", "combinada", "crea tu apuesta", "aumento de parlay"],
+        "wh_search": False
+    },
+    "William Hill": {
+        "url": "https://sports.williamhill.es/betting/es-es",
+        "keywords": ["épica", "insuperable", "cuota épica", "cuotas épicas"],
+        "blacklist": ["crea tu apuesta", "combinada", "3 o más"],
+        "wh_search": True,
+        "search_terms": ["épica", "insuperable"]
+    },
+    "Winamax": {
+        "url": "https://www.winamax.es/apuestas-deportivas",
+        "keywords": ["gran supercuota", "supercuota"],
+        "blacklist": ["mymatch", "combinada"],
+        "wh_search": False
+    },
+    "Casino Gran Madrid": {
+        "url": "https://www.casinogranmadridonline.es/apuestas-deportivas/",
+        "keywords": ["apuesta del día", "apuestas del día"],
+        "blacklist": ["combinada"],
+        "wh_search": False
+    },
+    "Betfair": {
+        "url": "https://www.betfair.es/sport/football",
+        "keywords": ["supercuota"],
+        "blacklist": ["combipartido", "combinada"],
+        "wh_search": False
+    },
+    "Paf": {
+        "url": "https://www.paf.es/es/sportsbook",
+        "keywords": ["cuotas mejoradas", "cuota mejorada"],
+        "blacklist": ["combinada", "crea tu apuesta"],
+        "wh_search": False
+    },
+    "Betway": {
+        "url": "https://betway.es/es/esports",
+        "keywords": ["mega cuota", "megacuota"],
+        "blacklist": ["combinada"],
+        "wh_search": False
+    },
+    "Interwetten": {
+        "url": "https://www.interwetten.es/es/apuestas-deportivas",
+        "keywords": ["supercuota", "megacuota"],
+        "blacklist": ["combinada"],
+        "wh_search": False
+    },
+    "Bwin": {
+        "url": "https://sports.bwin.es/es/sports",
+        "keywords": ["supercuota", "precio mejorado"],
+        "blacklist": ["build a bet", "combinada"],
+        "wh_search": False
+    }
 }
 
-keywords = [
-    'supercuota', 'cuota mejorada', 'boost', 'odds boost', 'oddsboost', 'super cuota', 
-    'megacuota', 'aumento de cuota', 'aumento de apuesta', 'aumento', 'mejorada', 
-    'especiales', 'superprecio', 'cuota aumentada', 'aumento de ganancias',
-    'cuota épica', 'cuotas insuperables', 'épica', 'insuperable', 'cuota epica'
-]
-
 def log(mensaje):
-    """Imprime mensajes con marca de tiempo para trazabilidad en tiempo real."""
     timestamp = time.strftime("%H:%M:%S")
     print(f"[{timestamp}] {mensaje}", flush=True)
 
@@ -59,17 +95,31 @@ def calcular_ev(supercuota, cuota_referencia_base):
     ev = (probabilidad_real * supercuota) - 1
     return round(ev * 100, 2)
 
-async def enviar_telegram(session, mensaje):
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
+async def enviar_telegram_con_foto(session, mensaje, ruta_imagen=None):
+    if ruta_imagen and os.path.exists(ruta_imagen):
+        url = f"https://api.telegram.org/bot{token}/sendPhoto"
+        data = aiohttp.FormData()
+        data.add_field('chat_id', user_id)
+        data.add_field('caption', mensaje)
+        data.add_field('parse_mode', 'Markdown')
+        data.add_field('photo', open(ruta_imagen, 'rb'), filename='oferta.png')
+        try:
+            async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                pass
+            os.remove(ruta_imagen)
+            return
+        except Exception as e:
+            log(f"Error enviando foto a Telegram: {e}")
+
+    url_text = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {'chat_id': user_id, 'text': mensaje, 'parse_mode': 'Markdown'}
     try:
-        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+        async with session.post(url_text, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as resp:
             pass
     except Exception as e:
         log(f"Error enviando mensaje a Telegram: {e}")
 
 def extraer_cuotas_limpias(texto):
-    """Filtra importes en euros (€) e identificadores secundarios."""
     texto_sin_euros = re.sub(r'\b\d+[\.,]?\d*\s*€', '', texto)
     numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_sin_euros)
     cuotas_validas = []
@@ -82,136 +132,45 @@ def extraer_cuotas_limpias(texto):
             continue
     return cuotas_validas
 
-async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
+async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial):
     nuevas = False
+    keywords = config["keywords"]
+    blacklist = config["blacklist"]
+
     try:
-        # 1. Espera activa para hidratar Custom Elements en Bet365 y casas con SPA
-        if "bet365" in url_actual.lower():
+        if "bet365" in nombre_casa.lower():
             try:
                 await page.wait_for_selector('div, article, section', timeout=4000)
-                # Scroll para detonar la carga diferida del banner de aumentos
-                await page.evaluate("window.scrollBy(0, 200);")
+                await page.evaluate("window.scrollBy(0, 250);")
                 await page.wait_for_timeout(1500)
             except Exception:
                 pass
 
-        # Seleccionar contenedores del DOM
         elementos = await page.query_selector_all('article, section, div[class*="boost"], div[class*="promo"], div[class*="offer"], div')
         
         for el in elementos:
             try:
                 texto = await el.inner_text()
                 texto_limpio = texto.strip()
+                texto_lower = texto_limpio.lower()
                 
-                if any(palabra in texto_limpio.lower() for palabra in keywords):
-                    if 5 < len(texto_limpio) < 300:
+                # 1. Filtro estricto por nombres reales de la casa
+                if any(kw in texto_lower for kw in keywords):
+                    # 2. Descartar si incluye términos de combinadas/creador de apuestas
+                    if any(bl in texto_lower for bl in blacklist):
+                        continue
+
+                    if 5 < len(texto_limpio) < 200:
                         cuotas = extraer_cuotas_limpias(texto_limpio)
 
                         if len(cuotas) >= 1:
                             supercuota_val = max(cuotas)
-                            
-                            # Determinación precisa de la cuota base de referencia
-                            if len(cuotas) > 1:
-                                cuota_referencia = min(cuotas)
-                            else:
-                                cuota_referencia = round(supercuota_val * 0.75, 2)
+                            cuota_referencia = min(cuotas) if len(cuotas) > 1 else round(supercuota_val * 0.8, 2)
 
-                            texto_resumen = texto_limpio[:60].replace('\n', ' ')
-                            log(f"  📌 Detectado en {nombre_casa}: '{texto_resumen}...' | Cuota: {supercuota_val}")
+                            texto_resumen = texto_limpio[:50].replace('\n', ' ')
+                            log(f"  📌 Oferta real detectada en {nombre_casa}: '{texto_resumen}...' | Cuota: {supercuota_val}")
 
-                            id_oferta = f"{nombre_casa}_{texto_limpio[:25]}_{supercuota_val}"
+                            id_oferta = f"{nombre_casa}_{texto_limpio[:20]}_{supercuota_val}"
                             
                             if id_oferta in historial:
-                                log(f"  ⏩ Omitida: Ya registrada en el historial.")
-                                continue
-
-                            ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
-                            
-                            mensaje = (
-                                f"🎯 **NUEVA SUPERCUOTA DETECTADA (+EV REAL)**\n\n"
-                                f"🏦 **Casa:** {nombre_casa.upper()}\n"
-                                f"📌 **Apuesta:** {texto_limpio.replace(chr(10), ' ')}\n"
-                                f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
-                                f"📊 **Cuota Referencia Base:** {cuota_referencia}\n"
-                                f"📈 **Valor Esperado (+EV):** +{ev_porcentaje}%\n\n"
-                                f"🔗 [Ir a la oferta]({url_actual})"
-                            )
-
-                            await enviar_telegram(session, mensaje)
-                            log(f"  ✅ ¡ALERTA ENVIADA A TELEGRAM! (+EV: +{ev_porcentaje}%).")
-                            historial.add(id_oferta)
-                            nuevas = True
-            except Exception:
-                continue
-    except Exception as e:
-        log(f"  ⚠️ Error durante el escaneo del DOM en {nombre_casa}: {e}")
-            
-    return nuevas
-
-async def rastrear():
-    historial = cargar_historial()
-    nuevas_alertas = False
-
-    async with aiohttp.ClientSession() as session:
-        async with async_playwright() as p:
-            log("🚀 Iniciando Chromium con enmascaramiento anti-detección...")
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox',
-                    '--disable-setuid-sandbox',
-                    '--disable-infobars',
-                    '--window-position=0,0',
-                    '--ignore-certificate-errors',
-                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
-                ]
-            )
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-                viewport={'width': 1280, 'height': 800},
-                locale="es-ES",
-                timezone_id="Europe/Madrid"
-            )
-
-            page = await context.new_page()
-            page.set_default_timeout(6000)
-
-            # Inyección para ocultar automatización de Playwright
-            await page.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            """)
-
-            log("🤖 Comienza el recorrido por las casas de apuestas...")
-
-            for nombre_casa, url in casas.items():
-                log(f"🔍 Escaneando {nombre_casa} ({url})...")
-                try:
-                    await page.goto(url, timeout=8000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1000)
-
-                    # Intentar cerrar el banner de cookies de forma limpia
-                    try:
-                        cookie_btn = await page.query_selector('button:has-text("Aceptar y cerrar"), button:has-text("Aceptar")')
-                        if cookie_btn:
-                            await cookie_btn.click(timeout=1000)
-                            await page.wait_for_timeout(500)
-                    except Exception:
-                        pass
-
-                    alerta = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
-                    if alerta:
-                        nuevas_alertas = True
-
-                except Exception as e:
-                    log(f"  ⚡ Salto seguro por timeout en {nombre_casa}: {e}")
-
-            await browser.close()
-            log("🏁 Navegador cerrado correctamente.")
-
-    if nuevas_alertas:
-        guardar_historial(historial)
-        log("💾 Historial de alertas actualizado.")
-
-if __name__ == "__main__":
-    asyncio.run(rastrear())
+                                log(f"
