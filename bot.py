@@ -13,7 +13,6 @@ user_id = "865364645"
 HISTORIAL_FILE = "alertas_definitivo.json"
 SCREENSHOT_PATH = "oferta_detectada.png"
 
-# Configuración de casas de apuestas estables
 CONFIG_CASAS = {
     "Winamax": {
         "url": "https://www.winamax.es/apuestas-deportivas",
@@ -187,7 +186,7 @@ async def rastrear():
 
     async with aiohttp.ClientSession() as session:
         async with async_playwright() as p:
-            log("🚀 Iniciando rastreo limpio...")
+            log("🚀 Iniciando rastreo ultra-rápido...")
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -212,13 +211,14 @@ async def rastrear():
             for nombre_casa, config in CONFIG_CASAS.items():
                 log(f"🔍 Escaneando {nombre_casa}...")
                 try:
-                    await page.goto(config['url'], timeout=8000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000)
+                    # Timeout estricto de 4 segundos: si no carga rápido, no se queda atascado
+                    await page.goto(config['url'], timeout=4000, wait_until="commit")
+                    await page.wait_for_timeout(1000)
 
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Aceptar y cerrar"), button:has-text("Allow all")')
                         if cookie_btn:
-                            await cookie_btn.click(timeout=800)
+                            await cookie_btn.click(timeout=500)
                     except Exception:
                         pass
 
@@ -226,7 +226,7 @@ async def rastrear():
                         nuevas_alertas = True
 
                 except Exception as e:
-                    log(f"  ⚡ Salto seguro en {nombre_casa}: {e}")
+                    log(f"  ⚡ Salto rápido por timeout en {nombre_casa}: avanzando...")
 
             await browser.close()
             log("🏁 Proceso finalizado.")
