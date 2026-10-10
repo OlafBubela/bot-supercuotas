@@ -10,7 +10,8 @@ from playwright.async_api import async_playwright
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
 user_id = "865364645"
 
-HISTORIAL_FILE = "alertas_enviadas.json"
+# Reseteamos el archivo a v3 para que no ignore ofertas registradas en pruebas pasadas
+HISTORIAL_FILE = "alertas_v3.json"
 SCREENSHOT_PATH = "oferta_detectada.png"
 
 CONFIG_CASAS = {
@@ -146,7 +147,6 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
             except Exception:
                 pass
 
-        # Búsqueda ampliada en elementos interactivos y tarjetas
         elementos = await page.query_selector_all('article, section, button, div[class*="boost"], div[class*="promo"], div[class*="offer"], div')
         
         for el in elementos:
@@ -155,7 +155,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                 texto_limpio = texto.strip()
                 texto_lower = texto_limpio.lower()
                 
-                # 1. Coincidencia de la palabra clave de la casa
+                # 1. Coincidencia de palabra clave
                 if any(kw in texto_lower for kw in keywords):
                     # 2. Descartar si contiene combinadas/parlay
                     if any(bl in texto_lower for bl in blacklist):
@@ -257,7 +257,6 @@ async def rastrear():
                     except Exception:
                         pass
 
-                    # Búsqueda interactiva en William Hill
                     if config.get("wh_search"):
                         for termino in config.get("search_terms", []):
                             try:
