@@ -14,17 +14,17 @@ ODDS_API_KEY = "23fbe34384f88b2bf502bc977f1bb24f"
 
 HISTORIAL_FILE = "alertas_enviadas.json"
 
-# Rutas generales y secciones de aumentos profundos/eSports
+# Rutas optimizadas (portadas y secciones clave)
 casas = {
     "Paf": "https://www.paf.es/es/sportsbook",
     "Winamax": "https://www.winamax.es/apuestas-deportivas",
     "William Hill": "https://sports.williamhill.es/betting/es-es",
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas",
     "Betway": "https://betway.es/es/esports",
-    "Betfair": "https://www.betfair.es/sport/esports",
+    "Betfair": "https://www.betfair.es/sport/football",
     "Bwin": "https://sports.bwin.es/es/sports",
     "Casino Gran Madrid": "https://www.casinogranmadridonline.es/apuestas-deportivas/",
-    "Bet365 eSports / Aumentos": "https://www.bet365.es/#/AS/B151/"
+    "Bet365 Deportes": "https://www.bet365.es/#/HO/"
 }
 
 keywords = [
@@ -48,24 +48,28 @@ def guardar_historial(historial):
     with open(HISTORIAL_FILE, 'w', encoding='utf-8') as f:
         json.dump(list(historial), f, ensure_ascii=False, indent=2)
 
-def obtener_cuota_mercado_api(deporte="upcoming"):
-    """
-    Consulta The Odds API para obtener la cuota justa de referencia en Pinnacle/Mercado.
-    """
+def obtener_max_cuota_mercado(deporte="upcoming"):
     if not ODDS_API_KEY:
         return None
-    
-    url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/?apiKey={ODDS_API_KEY}&regions=eu&markets=h2h&bookmakers=pinnacle"
+    url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/?apiKey={ODDS_API_KEY}&regions=eu&markets=h2h"
     try:
         res = requests.get(url, timeout=5)
         if res.status_code == 200:
-            return res.json()
+            datos = res.json()
+            cuotas = []
+            for evento in datos:
+                for bm in evento.get('bookmakers', []):
+                    for mk in bm.get('markets', []):
+                        for outcome in mk.get('outcomes', []):
+                            cuotas.append(outcome.get('price', 0))
+            if cuotas:
+                return max(cuotas)
     except Exception:
         pass
     return None
 
-def calcular_ev(supercuota, cuota_justa):
-    probabilidad_real = 1 / cuota_justa
+def calcular_ev(supercuota, cuota_referencia_mercado):
+    probabilidad_real = 1 / cuota_referencia_mercado
     ev = (probabilidad_real * supercuota) - 1
     return round(ev * 100, 2)
 
@@ -79,6 +83,73 @@ def enviar_telegram_con_foto(mensaje, foto_path):
         }
         files = {'photo': photo}
         requests.post(url, data=payload, files=files)
+
+async def escaneo_elementos_pagina(page, nombre_casa, url_actual, historial):
+    nuevas = False
+    elementos = await page.query_selector_all('span, div, a, h3, p, article')
+    
+    for el in elementos:
+        try:
+            texto = await el.inner_text()
+            texto_limpio = texto.strip()
+            
+            if any(palabra in texto_limpio.lower() for palabra in keywords):
+                if 5 < len(texto_limpio) < 300:
+                    numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_limpio)
+                    if len(numeros) >= 1:
+                        float_numeros = [float(n.replace(',', '.')) for n in numeros if 1.10 <= float(n.replace(',', '.')) <= 100.0]
+                        
+                        if len(float_numeros) >= 2:
+                            cuota_casa_previa = min(float_numeros)
+                            supercuota_val = max(float_numeros)
+                        elif len(float_numeros) == 1:
+                            supercuota_val = float_numeros[0]
+                            cuota_casa_previa = round(supercuota_val * 0.75, 2)
+                        else:
+                            continue
+
+                        if 1.20 <= supercuota_val <= 50.0 and supercuota_val > cuota_casa_previa:
+                            id_oferta = f"{nombre_casa}_{texto_limpio[:40]}_{supercuota_val}"
+                            
+                            if id_oferta in historial:
+                                continue
+
+                            cuota_mercado_max = obtener_max_cuota_mercado()
+                            cuota_referencia = cuota_mercado_max if cuota_mercado_max else cuota_casa_previa
+
+                            ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
+                            
+                            if ev_porcentaje <= 0:
+                                continue
+
+                            foto_filename = f"screenshot_{nombre_casa}.png"
+
+                            try:
+                                await el.screenshot(path=foto_filename)
+                            except Exception:
+                                await page.screenshot(path=foto_filename, full_page=False)
+
+                            texto_formateado = texto_limpio.replace('\n', ' ')
+
+                            mensaje = (
+                                f"🎯 **NUEVA SUPERCUOTA DETECTADA (+EV REAL)**\n\n"
+                                f"🏦 **Casa:** {nombre_casa.upper()}\n"
+                                f"📌 **Apuesta:** {texto_formateado}\n"
+                                f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
+                                f"📊 **Cuota Mercado / Ref:** {cuota_referencia}\n"
+                                f"📈 **Valor Esperado Real (+EV):** +{ev_porcentaje}%\n\n"
+                                f"🔗 [Ir a la oferta]({url_actual})"
+                            )
+
+                            enviar_telegram_con_foto(mensaje, foto_filename)
+                            print(f"Alerta enviada para {nombre_casa} (+EV: +{ev_porcentaje}%).")
+                            
+                            historial.add(id_oferta)
+                            nuevas = True
+                            break
+        except Exception:
+            continue
+    return nuevas
 
 async def rastrear():
     historial = cargar_historial()
@@ -94,79 +165,49 @@ async def rastrear():
 
         await page.route("**/*.{png,jpg,jpeg,svg,webp,mp4,woff,woff2}", lambda route: route.abort())
 
-        print("🤖 Comprobando supercuotas y analizando cuota justa de mercado...")
+        print("🤖 Comprobando portadas y navegando a eventos con aumentos ocultos...")
 
         for nombre_casa, url in casas.items():
             try:
                 await page.goto(url, timeout=25000, wait_until="domcontentloaded")
                 await page.wait_for_timeout(2000)
 
-                # Scroll automático profundo para revelar aumentos ocultos en Bet365/eSports
-                await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2);")
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3);")
                 await page.wait_for_timeout(1000)
 
-                elementos = await page.query_selector_all('span, div, a, h3, p, article')
-                
-                for el in elementos:
-                    texto = await el.inner_text()
-                    texto_limpio = texto.strip()
-                    
-                    if any(palabra in texto_limpio.lower() for palabra in keywords):
-                        if 5 < len(texto_limpio) < 250:
-                            numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_limpio)
-                            if len(numeros) >= 1:
-                                float_numeros = [float(n.replace(',', '.')) for n in numeros if 1.10 <= float(n.replace(',', '.')) <= 100.0]
-                                
-                                # Si encontramos cuota previa y cuota aumentada (como en Interwetten)
-                                if len(float_numeros) >= 2:
-                                    cuota_real_est = min(float_numeros)
-                                    supercuota_val = max(float_numeros)
-                                elif len(float_numeros) == 1:
-                                    supercuota_val = float_numeros[0]
-                                    cuota_real_est = round(supercuota_val * 0.82, 2)
-                                else:
-                                    continue
+                # 1. Escaneo de la portada principal
+                hubo_alerta = await escaneo_elementos_pagina(page, nombre_casa, url, historial)
+                if hubo_alerta:
+                    nuevas_alertas = True
 
-                                if 1.20 <= supercuota_val <= 50.0 and supercuota_val > cuota_real_est:
-                                    
-                                    id_oferta = f"{nombre_casa}_{texto_limpio[:40]}_{supercuota_val}"
-                                    
-                                    if id_oferta in historial:
-                                        print(f"⏩ Oferta ya enviada previamente para {nombre_casa}. Omitiendo.")
-                                        continue
+                # 2. Navegación a eventos internos para buscar aumentos escondidos
+                enlaces_eventos = await page.query_selector_all('a[href*="event"], a[href*="partido"], a[href*="match"], .src-MarketGroup')
+                urls_partidos = []
+                for link in enlaces_eventos[:3]:  # Analiza los 3 eventos principales para optimizar tiempo
+                    href = await link.get_attribute('href')
+                    if href and href.startswith('http'):
+                        urls_partidos.append(href)
 
-                                    ev_porcentaje = calcular_ev(supercuota_val, cuota_real_est)
-                                    
-                                    # Filtro de Valor Positivo: Solo enviamos si el +EV es estrictamente rentable
-                                    if ev_porcentaje <= 0:
-                                        print(f"⚠️ Cuota sin valor real (+EV negativo o nulo) en {nombre_casa}. Descarta.")
-                                        continue
+                for url_partido in set(urls_partidos):
+                    try:
+                        await page.goto(url_partido, timeout=15000, wait_until="domcontentloaded")
+                        await page.wait_for_timeout(1500)
 
-                                    foto_filename = f"screenshot_{nombre_casa}.png"
+                        # Intentar clicar en pestañas de aumentos/especiales si existen
+                        pestañas_aumentos = await page.query_selector_all('text="Aumento de apuesta", text="Aumentos", text="Supercuota", text="Especiales"')
+                        for tab in pestañas_aumentos[:2]:
+                            try:
+                                await tab.click(timeout=1000)
+                                await page.wait_for_timeout(500)
+                            except Exception:
+                                pass
 
-                                    try:
-                                        await el.screenshot(path=foto_filename)
-                                    except Exception:
-                                        await page.screenshot(path=foto_filename, full_page=False)
+                        alerta_interna = await escaneo_elementos_pagina(page, nombre_casa, url_partido, historial)
+                        if alerta_interna:
+                            nuevas_alertas = True
+                    except Exception:
+                        continue
 
-                                    texto_formateado = texto_limpio.replace('\n', ' ')
-
-                                    mensaje = (
-                                        f"🎯 **NUEVA SUPERCUOTA DETECTADA (+EV)**\n\n"
-                                        f"🏦 **Casa:** {nombre_casa.upper()}\n"
-                                        f"📌 **Apuesta:** {texto_formateado}\n"
-                                        f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
-                                        f"📊 **Cuota Real Mercado:** {cuota_real_est}\n"
-                                        f"📈 **Valor Esperado (+EV):** +{ev_porcentaje}%\n\n"
-                                        f"🔗 [Ir a la oferta]({url})"
-                                    )
-
-                                    enviar_telegram_con_foto(mensaje, foto_filename)
-                                    print(f"Alerta enviada para {nombre_casa}.")
-                                    
-                                    historial.add(id_oferta)
-                                    nuevas_alertas = True
-                                    break
             except Exception as e:
                 print(f"Error o tiempo agotado en {nombre_casa}: {e}")
 
