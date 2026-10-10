@@ -6,14 +6,12 @@ import time
 import aiohttp
 from playwright.async_api import async_playwright
 
-# Configuración de Telegram
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
 user_id = "865364645"
 
 HISTORIAL_FILE = "alertas_definitivo.json"
 SCREENSHOT_PATH = "oferta_detectada.png"
 
-# Enfocado EXCLUSIVAMENTE en Betfair
 CONFIG_BETFAIR = {
     "url": "https://www.betfair.es/sport/",
     "keywords": ["supercuota", "supercuotas", "cuota mejorada", "cuotas mejoradas", "precio mejorado", "aumento"],
@@ -164,4 +162,49 @@ async def rastrear():
                 ]
             )
 
-            # Configuración para for
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+                viewport={'width': 1280, 'height': 800},
+                locale="es-ES",
+                timezone_id="Europe/Madrid",
+                extra_http_headers={
+                    "Accept-Language": "es-ES,es;q=0.9",
+                    "X-Forwarded-For": "83.32.100.1",
+                    "CF-IPCountry": "ES"
+                }
+            )
+
+            page = await context.new_page()
+
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            """)
+
+            log("🔍 Entrando a Betfair...")
+            try:
+                await page.goto(CONFIG_BETFAIR['url'], timeout=12000, wait_until="domcontentloaded")
+                await page.wait_for_timeout(3000)
+
+                try:
+                    cookie_btn = await page.query_selector('button:has-text("Aceptar"), #onetrust-accept-btn-handler')
+                    if cookie_btn:
+                        await cookie_btn.click(timeout=800)
+                except Exception:
+                    pass
+
+                debug_img = "debug_betfair.png"
+                await page.screenshot(path=debug_img, full_page=False)
+                await enviar_telegram_con_foto(session, "📸 **CONTROL BETFAIR:** Verificando acceso", debug_img)
+
+                alerta_enviada = await escaneo_betfair(page, session, historial)
+                if alerta_enviada:
+                    guardar_historial(historial)
+
+            except Exception as e:
+                log(f"  ⚡ Error durante el acceso a Betfair: {e}")
+
+            await browser.close()
+            log("🏁 Proceso finalizado.")
+
+if __name__ == "__main__":
+    asyncio.run(rastrear())
