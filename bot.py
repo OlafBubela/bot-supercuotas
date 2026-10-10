@@ -90,7 +90,11 @@ async def enviar_telegram_con_foto(session, mensaje, foto_path):
 
 async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
     nuevas = False
-    elementos = await page.query_selector_all('span, div, a, h3, p, article')
+    # Capturamos bloques más amplios y específicos
+    elementos = await page.query_selector_all('article, div[class*="event"], div[class*="selection"], div[class*="market"], li, section')
+    if not elementos:
+        elementos = await page.query_selector_all('span, div, a, h3, p')
+
     coincidencias = 0
     
     for el in elementos:
@@ -99,7 +103,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
             texto_limpio = texto.strip()
             
             if any(palabra in texto_limpio.lower() for palabra in keywords):
-                if 5 < len(texto_limpio) < 300:
+                if 5 < len(texto_limpio) < 500:
                     numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_limpio)
                     if len(numeros) >= 1:
                         float_numeros = [float(n.replace(',', '.')) for n in numeros if 1.10 <= float(n.replace(',', '.')) <= 100.0]
@@ -114,7 +118,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                             continue
 
                         coincidencias += 1
-                        print(f"  📌 Texto detectado en {nombre_casa}: '{texto_limpio[:50]}...' | Cuota: {supercuota_val}", flush=True)
+                        print(f"  📌 Detectado en {nombre_casa}: '{texto_limpio[:60].replace(chr(10), ' ')}...' | Cuota: {supercuota_val}", flush=True)
 
                         if 1.20 <= supercuota_val <= 50.0 and supercuota_val > cuota_casa_previa:
                             id_oferta = f"{nombre_casa}_{texto_limpio[:40]}_{supercuota_val}"
@@ -181,15 +185,13 @@ async def rastrear():
             )
             page = await context.new_page()
 
-            await page.route("**/*.{png,jpg,jpeg,svg,webp,mp4,woff,woff2}", lambda route: route.abort())
-
-            print("🤖 Iniciando rastreo con búsqueda por URL directa...", flush=True)
+            # No abortamos imágenes totalmente en la búsqueda de William Hill para permitir la carga completa del DOM
+            print("🤖 Iniciando rastreo con espera dinámica de renderizado...", flush=True)
 
             for nombre_casa, url in casas.items():
                 print(f"🔍 Escaneando {nombre_casa}...", flush=True)
                 try:
-                    await page.goto(url, timeout=20000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500)
+                    await page.goto(url, timeout=25000, wait_until="networkidle")
 
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Accept"), #accept-cookies')
@@ -201,10 +203,15 @@ async def rastrear():
                     if nombre_casa == "William Hill":
                         for termino in TERMINOS_BUSQUEDA:
                             try:
-                                print(f"  🔎 Navegando directamente a búsqueda '{termino}' en William Hill...", flush=True)
+                                print(f"  🔎 Navegando a búsqueda '{termino}' en William Hill...", flush=True)
                                 search_url = f"https://sports.williamhill.es/betting/es-es/search?term={termino.replace(' ', '%20')}"
-                                await page.goto(search_url, timeout=20000, wait_until="domcontentloaded")
-                                await page.wait_for_timeout(3500)
+                                await page.goto(search_url, timeout=25000, wait_until="networkidle")
+                                
+                                # Esperar dinámicamente a que aparezcan tarjetas de eventos en pantalla
+                                try:
+                                    await page.wait_for_selector('article, div[class*="event"], div[class*="selection"], .search-results', timeout=6000)
+                                except Exception:
+                                    await page.wait_for_timeout(4000)
 
                                 alerta_busqueda = await escaneo_elementos_pagina(page, session, nombre_casa, search_url, historial)
                                 if alerta_busqueda:
