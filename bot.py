@@ -18,8 +18,7 @@ HISTORIAL_FILE = "alertas_enviadas.json"
 casas = {
     "Paf": "https://www.paf.es/es/sportsbook",
     "Winamax": "https://www.winamax.es/apuestas-deportivas",
-    "William Hill Destacados": "https://sports.williamhill.es/betting/es-es/highlights",
-    "William Hill Promos": "https://sports.williamhill.es/betting/es-es/apps/promociones",
+    "William Hill": "https://sports.williamhill.es/betting/es-es",
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas",
     "Betway": "https://betway.es/es/esports",
     "Betfair": "https://www.betfair.es/sport/football",
@@ -34,6 +33,8 @@ keywords = [
     'especiales', 'superprecio', 'cuota aumentada', 'aumento de ganancias',
     'cuota épica', 'cuotas insuperables', 'épica', 'insuperable', 'cuota epica'
 ]
+
+TERMINOS_BUSQUEDA_WH = ['Cuota Épica', 'Insuperable']
 
 def log(mensaje):
     """Imprime mensajes con marca de tiempo para trazabilidad en tiempo real."""
@@ -186,7 +187,7 @@ async def rastrear():
             page = await context.new_page()
             page.set_default_timeout(6000)
 
-            # Inyección para ocultar automatización de Playwright
+            # Inyección para ocultar automatización
             await page.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
             """)
@@ -207,6 +208,24 @@ async def rastrear():
                             await page.wait_for_timeout(500)
                     except Exception:
                         pass
+
+                    # Búsqueda interactiva en William Hill
+                    if nombre_casa == "William Hill":
+                        for termino in TERMINOS_BUSQUEDA_WH:
+                            try:
+                                log(f"  🔎 Buscando '{termino}' en la interfaz de William Hill...")
+                                search_input = await page.query_selector('input[type="search"], input[type="text"]')
+                                if search_input:
+                                    await search_input.fill("")
+                                    await search_input.type(termino, delay=50)
+                                    await page.keyboard.press("Enter")
+                                    await page.wait_for_timeout(2000)
+                                    
+                                    alerta_wh = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
+                                    if alerta_wh:
+                                        nuevas_alertas = True
+                            except Exception as e_wh:
+                                log(f"  ⚠️ Error en búsqueda de {termino}: {e_wh}")
 
                     await page.evaluate("window.scrollBy(0, 300);")
                     await page.wait_for_timeout(1500)
