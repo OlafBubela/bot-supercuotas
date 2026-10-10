@@ -183,7 +183,7 @@ async def rastrear():
 
             await page.route("**/*.{png,jpg,jpeg,svg,webp,mp4,woff,woff2}", lambda route: route.abort())
 
-            print("🤖 Iniciando rastreo con diagnóstico ampliado...", flush=True)
+            print("🤖 Iniciando rastreo con búsqueda por URL directa...", flush=True)
 
             for nombre_casa, url in casas.items():
                 print(f"🔍 Escaneando {nombre_casa}...", flush=True)
@@ -201,25 +201,16 @@ async def rastrear():
                     if nombre_casa == "William Hill":
                         for termino in TERMINOS_BUSQUEDA:
                             try:
-                                print(f"  🔎 Buscando '{termino}' en {nombre_casa}...", flush=True)
-                                search_btn = await page.query_selector('button[aria-label*="Search"], .search-trigger, .header__search, [data-test-id*="search"]')
-                                if search_btn:
-                                    await search_btn.click(timeout=1000)
-                                    await page.wait_for_timeout(500)
-                                
-                                search_input = await page.query_selector('input[type="search"], input[placeholder*="Buscar"], input[name*="search"]')
-                                if search_input:
-                                    await search_input.fill(termino)
-                                    await page.keyboard.press('Enter')
-                                    await page.wait_for_timeout(2500)
+                                print(f"  🔎 Navegando directamente a búsqueda '{termino}' en William Hill...", flush=True)
+                                search_url = f"https://sports.williamhill.es/betting/es-es/search?term={termino.replace(' ', '%20')}"
+                                await page.goto(search_url, timeout=20000, wait_until="domcontentloaded")
+                                await page.wait_for_timeout(3500)
 
-                                    alerta_busqueda = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
-                                    if alerta_busqueda:
-                                        nuevas_alertas = True
-                                else:
-                                    print("  ⚠️ No se encontró el campo de texto del buscador.", flush=True)
+                                alerta_busqueda = await escaneo_elementos_pagina(page, session, nombre_casa, search_url, historial)
+                                if alerta_busqueda:
+                                    nuevas_alertas = True
                             except Exception as e_search:
-                                print(f"  ⚠️ Error buscando {termino}: {e_search}", flush=True)
+                                print(f"  ⚠️ Error en la búsqueda directa de {termino}: {e_search}", flush=True)
 
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3);")
                     await page.wait_for_timeout(1000)
