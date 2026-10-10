@@ -18,7 +18,8 @@ HISTORIAL_FILE = "alertas_enviadas.json"
 casas = {
     "Paf": "https://www.paf.es/es/sportsbook",
     "Winamax": "https://www.winamax.es/apuestas-deportivas",
-    "William Hill": "https://sports.williamhill.es/betting/es-es",
+    "William Hill Épicas": "https://sports.williamhill.es/betting/es-es/highlights",
+    "William Hill Promos": "https://sports.williamhill.es/betting/es-es/apps/promociones",
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas",
     "Betway": "https://betway.es/es/esports",
     "Betfair": "https://www.betfair.es/sport/football",
@@ -33,8 +34,6 @@ keywords = [
     'especiales', 'superprecio', 'cuota aumentada', 'aumento de ganancias',
     'cuota épica', 'cuotas insuperables', 'épica', 'insuperable', 'cuota epica'
 ]
-
-TERMINOS_BUSQUEDA_WH = ['Cuota Épica', 'Insuperable']
 
 def log(mensaje):
     """Imprime mensajes con marca de tiempo para trazabilidad en tiempo real."""
@@ -59,7 +58,7 @@ async def obtener_max_cuota_mercado(session, deporte="upcoming"):
         return None
     url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/?apiKey={ODDS_API_KEY}&regions=eu&markets=h2h"
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=4)) as res:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as res:
             if res.status == 200:
                 datos = await res.json()
                 cuotas = []
@@ -89,7 +88,7 @@ async def enviar_telegram(session, mensaje):
         log(f"Error enviando mensaje a Telegram: {e}")
 
 def extraer_cuotas_limpias(texto):
-    """Filtra los importes en euros (€) para no confundir ganancias con cuotas."""
+    """Filtra importes en euros (€) e identificadores numéricos secundaciones."""
     texto_sin_euros = re.sub(r'\b\d+[\.,]?\d*\s*€', '', texto)
     numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_sin_euros)
     cuotas_validas = []
@@ -105,7 +104,8 @@ def extraer_cuotas_limpias(texto):
 async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
     nuevas = False
     try:
-        elementos = await page.query_selector_all('div, article, button, a, li, section')
+        # Priorizar contenedores específicos de tarjetas y ofertas principales
+        elementos = await page.query_selector_all('div[class*="Boost"], div[class*="Promo"], div[class*="Offer"], article, section, div')
         
         for el in elementos:
             try:
@@ -113,17 +113,15 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                 texto_limpio = texto.strip()
                 
                 if any(palabra in texto_limpio.lower() for palabra in keywords):
-                    if 5 < len(texto_limpio) < 300:
+                    if 5 < len(texto_limpio) < 250:
                         cuotas = extraer_cuotas_limpias(texto_limpio)
-                        
-                        # IMPRESIÓN DE PRUEBA: Muestra en los logs todo lo que detecta en William Hill
-                        if nombre_casa == "William Hill":
-                            texto_resumen_test = texto_limpio[:50].replace('\n', ' ')
-                            log(f"  🔍 [TEST WH] Leído: '{texto_resumen_test}...' | Cuotas halladas: {cuotas}")
 
                         if len(cuotas) >= 1:
+                            # Seleccionar la cuota más alta o relevante de la tarjeta específica
                             supercuota_val = max(cuotas)
-                            cuota_casa_previa = min(cuotas) if len(cuotas) > 1 else round(supercuota_val * 0.8, 2)
+                            
+                            # Referencia estimada previa (20% inferior si no hay cuota doble en el texto)
+                            cuota_referencia = min(cuotas) if len(cuotas) > 1 else round(supercuota_val * 0.8, 2)
 
                             texto_resumen = texto_limpio[:50].replace('\n', ' ')
                             log(f"  📌 Detectado en {nombre_casa}: '{texto_resumen}...' | Cuota: {supercuota_val}")
@@ -134,22 +132,15 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                                 log(f"  ⏩ Omitida: Ya registrada en el historial.")
                                 continue
 
-                            cuota_mercado_max = await obtener_max_cuota_mercado(session)
-                            cuota_referencia = cuota_mercado_max if cuota_mercado_max else cuota_casa_previa
-
                             ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
                             
-                            if ev_porcentaje <= 0:
-                                log(f"  ⚠️ Omitida: +EV no rentable ({ev_porcentaje}% vs Ref {cuota_referencia}).")
-                                continue
-
                             mensaje = (
                                 f"🎯 **NUEVA SUPERCUOTA DETECTADA (+EV REAL)**\n\n"
                                 f"🏦 **Casa:** {nombre_casa.upper()}\n"
                                 f"📌 **Apuesta:** {texto_limpio.replace(chr(10), ' ')}\n"
                                 f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
-                                f"📊 **Cuota Mercado / Ref:** {cuota_referencia}\n"
-                                f"📈 **Valor Esperado Real (+EV):** +{ev_porcentaje}%\n\n"
+                                f"📊 **Cuota Referencia Base:** {cuota_referencia}\n"
+                                f"📈 **Valor Esperado (+EV):** +{ev_porcentaje}%\n\n"
                                 f"🔗 [Ir a la oferta]({url_actual})"
                             )
 
@@ -191,7 +182,7 @@ async def rastrear():
             )
 
             page = await context.new_page()
-            page.set_default_timeout(6000)
+            page.set_default_timeout(5000)
 
             # Inyección para ocultar automatización de Playwright
             await page.add_init_script("""
@@ -203,37 +194,19 @@ async def rastrear():
             for nombre_casa, url in casas.items():
                 log(f"🔍 Escaneando {nombre_casa} ({url})...")
                 try:
-                    await page.goto(url, timeout=9000, wait_until="commit")
+                    await page.goto(url, timeout=7000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(1000)
 
                     # Intentar cerrar el banner de cookies
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar y cerrar"), button:has-text("Aceptar")')
                         if cookie_btn:
-                            await cookie_btn.click(timeout=1500)
+                            await cookie_btn.click(timeout=1000)
                             await page.wait_for_timeout(500)
                     except Exception:
                         pass
 
-                    # Búsqueda interactiva en William Hill
-                    if nombre_casa == "William Hill":
-                        for termino in TERMINOS_BUSQUEDA_WH:
-                            try:
-                                log(f"  🔎 Buscando '{termino}' en la interfaz de William Hill...")
-                                search_input = await page.query_selector('input[type="search"], input[type="text"]')
-                                if search_input:
-                                    await search_input.fill("")
-                                    await search_input.type(termino, delay=50)
-                                    await page.keyboard.press("Enter")
-                                    await page.wait_for_timeout(2000)
-                                    
-                                    alerta_wh = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
-                                    if alerta_wh:
-                                        nuevas_alertas = True
-                            except Exception as e_wh:
-                                log(f"  ⚠️ Error en búsqueda de {termino}: {e_wh}")
-
-                    await page.evaluate("window.scrollBy(0, 300);")
+                    await page.evaluate("window.scrollBy(0, 400);")
                     await page.wait_for_timeout(1500)
 
                     alerta_general = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
@@ -241,7 +214,7 @@ async def rastrear():
                         nuevas_alertas = True
 
                 except Exception as e:
-                    log(f"  ⚡ Salto seguro por timeout/error en {nombre_casa}: {e}")
+                    log(f"  ⚡ Salto seguro por timeout en {nombre_casa}: {e}")
 
             await browser.close()
             log("🏁 Navegador cerrado correctamente.")
