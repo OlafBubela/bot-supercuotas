@@ -105,6 +105,15 @@ def extraer_cuotas_limpias(texto):
 async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
     nuevas = False
     try:
+        # Extraer todo el texto visible para diagnosticar la búsqueda
+        texto_completo = await page.inner_text("body")
+        
+        if "search" in url_actual:
+            lineas = [l.strip() for l in texto_completo.split("\n") if l.strip()]
+            log(f"  📄 Muestra de texto leída en búsqueda ({len(lineas)} líneas encontradas)")
+            for linea in lineas[:8]:
+                log(f"     -> {linea}")
+
         elementos = await page.query_selector_all('div, article, button, a, li, section')
         
         for el in elementos:
@@ -203,7 +212,6 @@ async def rastrear():
                                 log(f"  🔎 Búsqueda por URL directa: '{termino}'...")
                                 await page.goto(search_url, timeout=8000, wait_until="domcontentloaded")
                                 
-                                # Scroll y espera de 2 segundos para forzar a JavaScript a renderizar las tarjetas
                                 await page.evaluate("window.scrollBy(0, 400);")
                                 await page.wait_for_timeout(2000)
 
