@@ -138,16 +138,16 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
     blacklist = config["blacklist"]
 
     try:
-        # En Bet365 forzamos scroll dinámico profundo para desplegar superaumentos en partidos
         if "bet365" in nombre_casa.lower():
             try:
-                await page.wait_for_selector('div, article, section', timeout=3000)
-                await page.evaluate("window.scrollBy(0, 500);")
-                await page.wait_for_timeout(1200)
+                await page.wait_for_selector('div, article, section, button', timeout=3000)
+                await page.evaluate("window.scrollBy(0, 400);")
+                await page.wait_for_timeout(1000)
             except Exception:
                 pass
 
-        elementos = await page.query_selector_all('article, section, div[class*="boost"], div[class*="promo"], div[class*="offer"], div')
+        # Búsqueda ampliada en elementos interactivos y tarjetas
+        elementos = await page.query_selector_all('article, section, button, div[class*="boost"], div[class*="promo"], div[class*="offer"], div')
         
         for el in elementos:
             try:
@@ -155,13 +155,12 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                 texto_limpio = texto.strip()
                 texto_lower = texto_limpio.lower()
                 
-                # 1. Filtro estricto por coincidencia exacta de la palabra clave de la casa
+                # 1. Coincidencia de la palabra clave de la casa
                 if any(kw in texto_lower for kw in keywords):
-                    # 2. Descartar si contiene combinadas o parlay
+                    # 2. Descartar si contiene combinadas/parlay
                     if any(bl in texto_lower for bl in blacklist):
                         continue
 
-                    # Para Bet365 permitimos bloques más extensos si está dentro de un partido
                     max_len = 600 if "bet365" in nombre_casa.lower() else 350
 
                     if 5 < len(texto_limpio) < max_len:
@@ -182,7 +181,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
 
                             ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
                             
-                            # Realiza la captura de pantalla directa del elemento del superaumento
+                            # Captura de pantalla del elemento concreto
                             try:
                                 await el.screenshot(path=SCREENSHOT_PATH)
                             except Exception:
