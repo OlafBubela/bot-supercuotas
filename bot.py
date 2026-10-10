@@ -18,7 +18,8 @@ HISTORIAL_FILE = "alertas_enviadas.json"
 casas = {
     "Paf": "https://www.paf.es/es/sportsbook",
     "Winamax": "https://www.winamax.es/apuestas-deportivas",
-    "William Hill": "https://sports.williamhill.es/betting/es-es",
+    "William Hill Destacados": "https://sports.williamhill.es/betting/es-es/highlights",
+    "William Hill Promos": "https://sports.williamhill.es/betting/es-es/apps/promociones",
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas",
     "Betway": "https://betway.es/es/esports",
     "Betfair": "https://www.betfair.es/sport/football",
@@ -33,8 +34,6 @@ keywords = [
     'especiales', 'superprecio', 'cuota aumentada', 'aumento de ganancias',
     'cuota épica', 'cuotas insuperables', 'épica', 'insuperable', 'cuota epica'
 ]
-
-TERMINOS_BUSQUEDA_WH = ['Cuota Épica', 'Insuperable']
 
 def log(mensaje):
     """Imprime mensajes con marca de tiempo para trazabilidad en tiempo real."""
@@ -105,15 +104,6 @@ def extraer_cuotas_limpias(texto):
 async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
     nuevas = False
     try:
-        # Extraer todo el texto visible para diagnosticar la búsqueda
-        texto_completo = await page.inner_text("body")
-        
-        if "search" in url_actual:
-            lineas = [l.strip() for l in texto_completo.split("\n") if l.strip()]
-            log(f"  📄 Muestra de texto leída en búsqueda ({len(lineas)} líneas encontradas)")
-            for linea in lineas[:8]:
-                log(f"     -> {linea}")
-
         elementos = await page.query_selector_all('div, article, button, a, li, section')
         
         for el in elementos:
@@ -173,53 +163,53 @@ async def rastrear():
 
     async with aiohttp.ClientSession() as session:
         async with async_playwright() as p:
-            log("🚀 Iniciando navegador Chromium con configuración anti-bloqueos...")
+            log("🚀 Iniciando navegador Chromium con enmascaramiento de IP/VPN...")
             browser = await p.chromium.launch(
                 headless=True,
-                args=['--disable-blink-features=AutomationControlled', '--no-sandbox']
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-infobars',
+                    '--window-position=0,0',
+                    '--ignore-certificate-errors',
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                ]
             )
             context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                viewport={'width': 1280, 'height': 800}
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+                viewport={'width': 1280, 'height': 800},
+                locale="es-ES",
+                timezone_id="Europe/Madrid"
             )
 
             page = await context.new_page()
-            page.set_default_timeout(5000)
+            page.set_default_timeout(6000)
+
+            # Inyección para ocultar automatización de Playwright
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            """)
 
             log("🤖 Comienza el recorrido por las casas de apuestas...")
 
             for nombre_casa, url in casas.items():
                 log(f"🔍 Escaneando {nombre_casa} ({url})...")
                 try:
-                    await page.goto(url, timeout=8000, wait_until="commit")
+                    await page.goto(url, timeout=9000, wait_until="commit")
                     await page.wait_for_timeout(1000)
 
                     # Intentar cerrar el banner de cookies
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar y cerrar"), button:has-text("Aceptar")')
                         if cookie_btn:
-                            log("  🍪 Botón de cookies encontrado. Intentando aceptar...")
-                            await cookie_btn.click(timeout=2000)
+                            await cookie_btn.click(timeout=1500)
                             await page.wait_for_timeout(500)
                     except Exception:
                         pass
 
-                    # Búsqueda en William Hill mediante URL directa + renderizado de 2s
-                    if nombre_casa == "William Hill":
-                        for termino in TERMINOS_BUSQUEDA_WH:
-                            try:
-                                search_url = f"https://sports.williamhill.es/betting/es-es/search?term={termino.replace(' ', '%20')}"
-                                log(f"  🔎 Búsqueda por URL directa: '{termino}'...")
-                                await page.goto(search_url, timeout=8000, wait_until="domcontentloaded")
-                                
-                                await page.evaluate("window.scrollBy(0, 400);")
-                                await page.wait_for_timeout(2000)
-
-                                alerta_wh = await escaneo_elementos_pagina(page, session, nombre_casa, search_url, historial)
-                                if alerta_wh:
-                                    nuevas_alertas = True
-                            except Exception as e_search:
-                                log(f"  ⚠️ Tiempo agotado en la búsqueda de '{termino}': {e_search}")
+                    await page.evaluate("window.scrollBy(0, 300);")
+                    await page.wait_for_timeout(1500)
 
                     alerta_general = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
                     if alerta_general:
