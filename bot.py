@@ -115,6 +115,12 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                 if any(palabra in texto_limpio.lower() for palabra in keywords):
                     if 5 < len(texto_limpio) < 300:
                         cuotas = extraer_cuotas_limpias(texto_limpio)
+                        
+                        # IMPRESIÓN DE PRUEBA: Muestra en los logs todo lo que detecta en William Hill
+                        if nombre_casa == "William Hill":
+                            texto_resumen_test = texto_limpio[:50].replace('\n', ' ')
+                            log(f"  🔍 [TEST WH] Leído: '{texto_resumen_test}...' | Cuotas halladas: {cuotas}")
+
                         if len(cuotas) >= 1:
                             supercuota_val = max(cuotas)
                             cuota_casa_previa = min(cuotas) if len(cuotas) > 1 else round(supercuota_val * 0.8, 2)
@@ -187,7 +193,7 @@ async def rastrear():
             page = await context.new_page()
             page.set_default_timeout(6000)
 
-            # Inyección para ocultar automatización
+            # Inyección para ocultar automatización de Playwright
             await page.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
             """)
