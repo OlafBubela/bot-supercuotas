@@ -88,9 +88,28 @@ async def enviar_telegram_con_foto(session, mensaje, foto_path):
     except Exception as e:
         print(f"Error enviando foto a Telegram: {e}", flush=True)
 
+def extraer_cuotas_limpias(texto):
+    """Filtra y extrae solo las cuotas reales ignorando ganancias en euros (€)."""
+    # Eliminar patrones de ganancias en euros tipo '66.50€' o '10€'
+    texto_sin_euros = re.sub(r'\b\d+[\.,]?\d*\s*€', '', texto)
+    
+    numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_sin_euros)
+    cuotas_validas = []
+    
+    for n in numeros:
+        try:
+            val = float(n.replace(',', '.'))
+            # Cuotas normales de supercuota (entre 1.20 y 15.00)
+            if 1.20 <= val <= 15.00:
+                cuotas_validas.append(val)
+        except ValueError:
+            continue
+            
+    return cuotas_validas
+
 async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
     nuevas = False
-    elementos = await page.query_selector_all('div, article, section, li, a, span')
+    elementos = await page.query_selector_all('article, div[class*="event"], div[class*="selection"], div[class*="market"], li, section, div, span')
     coincidencias = 0
     
     for el in elementos:
@@ -99,64 +118,61 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
             texto_limpio = texto.strip()
             
             if any(palabra in texto_limpio.lower() for palabra in keywords):
-                if 5 < len(texto_limpio) < 500:
-                    numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_limpio)
-                    if len(numeros) >= 1:
-                        float_numeros = [float(n.replace(',', '.')) for n in numeros if 1.10 <= float(n.replace(',', '.')) <= 100.0]
-                        
-                        if len(float_numeros) >= 2:
-                            cuota_casa_previa = min(float_numeros)
-                            supercuota_val = max(float_numeros)
-                        elif len(float_numeros) == 1:
-                            supercuota_val = float_numeros[0]
-                            cuota_casa_previa = round(supercuota_val * 0.75, 2)
+                if 5 < len(texto_limpio) < 400:
+                    cuotas_encontradas = extraer_cuotas_limpias(texto_limpio)
+                    
+                    if len(cuotas_encontradas) >= 1:
+                        if len(cuotas_encontradas) >= 2:
+                            cuota_casa_previa = min(cuotas_encontradas)
+                            supercuota_val = max(cuotas_encontradas)
                         else:
-                            continue
+                            supercuota_val = cuotas_encontradas[0]
+                            cuota_casa_previa = round(supercuota_val * 0.80, 2)
 
                         coincidencias += 1
-                        print(f"  📌 Detectado en {nombre_casa}: '{texto_limpio[:50].replace(chr(10), ' ')}...' | Cuota: {supercuota_val}", flush=True)
+                        texto_resumen = texto_limpio[:60].replace('\n', ' ')
+                        print(f"  📌 Detectado en {nombre_casa}: '{texto_resumen}...' | Cuota Limpia: {supercuota_val}", flush=True)
 
-                        if 1.20 <= supercuota_val <= 50.0 and supercuota_val > cuota_casa_previa:
-                            id_oferta = f"{nombre_casa}_{texto_limpio[:40]}_{supercuota_val}"
-                            
-                            if id_oferta in historial:
-                                print(f"  ⏩ Omitida: Oferta ya en historial.", flush=True)
-                                continue
+                        id_oferta = f"{nombre_casa}_{texto_limpio[:30]}_{supercuota_val}"
+                        
+                        if id_oferta in historial:
+                            print(f"  ⏩ Omitida: Oferta ya en historial.", flush=True)
+                            continue
 
-                            cuota_mercado_max = await obtener_max_cuota_mercado(session)
-                            cuota_referencia = cuota_mercado_max if cuota_mercado_max else cuota_casa_previa
+                        cuota_mercado_max = await obtener_max_cuota_mercado(session)
+                        cuota_referencia = cuota_mercado_max if cuota_mercado_max else cuota_casa_previa
 
-                            ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
-                            
-                            if ev_porcentaje <= 0:
-                                print(f"  ⚠️ Omitida: +EV no rentable ({ev_porcentaje}% vs Ref {cuota_referencia}).", flush=True)
-                                continue
+                        ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
+                        
+                        if ev_porcentaje <= 0:
+                            print(f"  ⚠️ Omitida: +EV no rentable ({ev_porcentaje}% vs Ref {cuota_referencia}).", flush=True)
+                            continue
 
-                            foto_filename = f"screenshot_{nombre_casa}.png"
+                        foto_filename = f"screenshot_{nombre_casa}.png"
 
-                            try:
-                                await el.screenshot(path=foto_filename)
-                            except Exception:
-                                await page.screenshot(path=foto_filename, full_page=False)
+                        try:
+                            await el.screenshot(path=foto_filename)
+                        except Exception:
+                            await page.screenshot(path=foto_filename, full_page=False)
 
-                            texto_formateado = texto_limpio.replace('\n', ' ')
+                        texto_formateado = texto_limpio.replace('\n', ' ')
 
-                            mensaje = (
-                                f"🎯 **NUEVA SUPERCUOTA DETECTADA (+EV REAL)**\n\n"
-                                f"🏦 **Casa:** {nombre_casa.upper()}\n"
-                                f"📌 **Apuesta:** {texto_formateado}\n"
-                                f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
-                                f"📊 **Cuota Mercado / Ref:** {cuota_referencia}\n"
-                                f"📈 **Valor Esperado Real (+EV):** +{ev_porcentaje}%\n\n"
-                                f"🔗 [Ir a la oferta]({url_actual})"
-                            )
+                        mensaje = (
+                            f"🎯 **NUEVA SUPERCUOTA DETECTADA (+EV REAL)**\n\n"
+                            f"🏦 **Casa:** {nombre_casa.upper()}\n"
+                            f"📌 **Apuesta:** {texto_formateado}\n"
+                            f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
+                            f"📊 **Cuota Mercado / Ref:** {cuota_referencia}\n"
+                            f"📈 **Valor Esperado Real (+EV):** +{ev_porcentaje}%\n\n"
+                            f"🔗 [Ir a la oferta]({url_actual})"
+                        )
 
-                            await enviar_telegram_con_foto(session, mensaje, foto_filename)
-                            print(f"  ✅ ¡ALERTA ENVIADA A TELEGRAM! (+EV: +{ev_porcentaje}%).", flush=True)
-                            
-                            historial.add(id_oferta)
-                            nuevas = True
-                            break
+                        await enviar_telegram_con_foto(session, mensaje, foto_filename)
+                        print(f"  ✅ ¡ALERTA ENVIADA A TELEGRAM! (+EV: +{ev_porcentaje}%).", flush=True)
+                        
+                        historial.add(id_oferta)
+                        nuevas = True
+                        break
         except Exception:
             continue
             
@@ -182,38 +198,35 @@ async def rastrear():
 
             page = await context.new_page()
 
-            # Cancelar imágenes/estilos para máxima velocidad
-            await page.route("**/*.{png,jpg,jpeg,svg,webp,mp4,woff,woff2,css}", lambda route: route.abort())
-
-            print("🤖 Iniciando rastreo ultra rápido...", flush=True)
+            # No bloqueamos CSS/JS para permitir el renderizado exacto de William Hill y Bet365
+            print("🤖 Iniciando rastreo con filtrado de cuotas puras (sin €)...", flush=True)
 
             for nombre_casa, url in casas.items():
                 print(f"🔍 Escaneando {nombre_casa}...", flush=True)
                 try:
-                    # Límite rápido de 8 segundos por casa
-                    await page.goto(url, timeout=8000, wait_until="commit")
-                    await page.wait_for_timeout(1000)
+                    await page.goto(url, timeout=15000, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2000)
 
                     if nombre_casa == "William Hill":
                         for termino in TERMINOS_BUSQUEDA:
                             try:
-                                print(f"  🔎 Búsqueda URL directa para '{termino}'...", flush=True)
+                                print(f"  🔎 Búsqueda URL para '{termino}'...", flush=True)
                                 search_url = f"https://sports.williamhill.es/betting/es-es/search?term={termino.replace(' ', '%20')}"
-                                await page.goto(search_url, timeout=8000, wait_until="commit")
-                                await page.wait_for_timeout(1500)
+                                await page.goto(search_url, timeout=15000, wait_until="domcontentloaded")
+                                await page.wait_for_timeout(3000)
 
                                 alerta_busqueda = await escaneo_elementos_pagina(page, session, nombre_casa, search_url, historial)
                                 if alerta_busqueda:
                                     nuevas_alertas = True
                             except Exception as e_search:
-                                print(f"  ⚠️ Salto rápido en búsqueda {termino}: {e_search}", flush=True)
+                                print(f"  ⚠️ Error buscando {termino}: {e_search}", flush=True)
 
                     hubo_alerta = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
                     if hubo_alerta:
                         nuevas_alertas = True
 
                 except Exception as e:
-                    print(f"⚡ Salto rápido por timeout en {nombre_casa}", flush=True)
+                    print(f"⚠️ Tiempo agotado cargando {nombre_casa}: {e}", flush=True)
 
             await browser.close()
 
