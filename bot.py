@@ -91,6 +91,7 @@ async def enviar_telegram_con_foto(session, mensaje, foto_path):
 async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
     nuevas = False
     elementos = await page.query_selector_all('span, div, a, h3, p, article')
+    coincidencias = 0
     
     for el in elementos:
         try:
@@ -112,11 +113,14 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                         else:
                             continue
 
+                        coincidencias += 1
+                        print(f"  📌 Texto detectado en {nombre_casa}: '{texto_limpio[:50]}...' | Cuota: {supercuota_val}", flush=True)
+
                         if 1.20 <= supercuota_val <= 50.0 and supercuota_val > cuota_casa_previa:
                             id_oferta = f"{nombre_casa}_{texto_limpio[:40]}_{supercuota_val}"
                             
                             if id_oferta in historial:
-                                print(f"⏩ Oferta repetida en {nombre_casa}. Ya en historial.", flush=True)
+                                print(f"  ⏩ Omitida: Oferta ya estaba registrada en el historial.", flush=True)
                                 continue
 
                             cuota_mercado_max = await obtener_max_cuota_mercado(session)
@@ -125,7 +129,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                             ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
                             
                             if ev_porcentaje <= 0:
-                                print(f"⚠️ Oferta descartada en {nombre_casa}: +EV {ev_porcentaje}% no rentable.", flush=True)
+                                print(f"  ⚠️ Omitida: +EV no rentable ({ev_porcentaje}% vs Ref {cuota_referencia}).", flush=True)
                                 continue
 
                             foto_filename = f"screenshot_{nombre_casa}.png"
@@ -148,13 +152,17 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                             )
 
                             await enviar_telegram_con_foto(session, mensaje, foto_filename)
-                            print(f"✅ Alerta enviada para {nombre_casa} (+EV: +{ev_porcentaje}%).", flush=True)
+                            print(f"  ✅ ¡ALERTA ENVIADA A TELEGRAM! (+EV: +{ev_porcentaje}%).", flush=True)
                             
                             historial.add(id_oferta)
                             nuevas = True
                             break
         except Exception:
             continue
+            
+    if coincidencias == 0:
+        print(f"  ℹ️ No se extrajo ningún bloque con texto + cuota válido en la vista actual.", flush=True)
+        
     return nuevas
 
 async def rastrear():
@@ -175,7 +183,7 @@ async def rastrear():
 
             await page.route("**/*.{png,jpg,jpeg,svg,webp,mp4,woff,woff2}", lambda route: route.abort())
 
-            print("🤖 Iniciando rastreo...", flush=True)
+            print("🤖 Iniciando rastreo con diagnóstico ampliado...", flush=True)
 
             for nombre_casa, url in casas.items():
                 print(f"🔍 Escaneando {nombre_casa}...", flush=True)
@@ -183,7 +191,6 @@ async def rastrear():
                     await page.goto(url, timeout=20000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(1500)
 
-                    # Intentar aceptar cookies si estorban
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Accept"), #accept-cookies')
                         if cookie_btn:
@@ -191,7 +198,6 @@ async def rastrear():
                     except Exception:
                         pass
 
-                    # Búsqueda específica en William Hill
                     if nombre_casa == "William Hill":
                         for termino in TERMINOS_BUSQUEDA:
                             try:
@@ -205,18 +211,19 @@ async def rastrear():
                                 if search_input:
                                     await search_input.fill(termino)
                                     await page.keyboard.press('Enter')
-                                    await page.wait_for_timeout(2000)
+                                    await page.wait_for_timeout(2500)
 
                                     alerta_busqueda = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
                                     if alerta_busqueda:
                                         nuevas_alertas = True
+                                else:
+                                    print("  ⚠️ No se encontró el campo de texto del buscador.", flush=True)
                             except Exception as e_search:
                                 print(f"  ⚠️ Error buscando {termino}: {e_search}", flush=True)
 
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3);")
                     await page.wait_for_timeout(1000)
 
-                    # Escaneo de la página principal
                     hubo_alerta = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
                     if hubo_alerta:
                         nuevas_alertas = True
