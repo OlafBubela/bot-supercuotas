@@ -18,8 +18,7 @@ HISTORIAL_FILE = "alertas_enviadas.json"
 casas = {
     "Paf": "https://www.paf.es/es/sportsbook",
     "Winamax": "https://www.winamax.es/apuestas-deportivas",
-    "William Hill Épicas": "https://sports.williamhill.es/betting/es-es/highlights",
-    "William Hill Promos": "https://sports.williamhill.es/betting/es-es/apps/promociones",
+    "William Hill Promos": "https://sports.williamhill.es/betting/es-es/highlights",
     "Interwetten": "https://www.interwetten.es/es/apuestas-deportivas",
     "Betway": "https://betway.es/es/esports",
     "Betfair": "https://www.betfair.es/sport/football",
@@ -53,28 +52,10 @@ def guardar_historial(historial):
     with open(HISTORIAL_FILE, 'w', encoding='utf-8') as f:
         json.dump(list(historial), f, ensure_ascii=False, indent=2)
 
-async def obtener_max_cuota_mercado(session, deporte="upcoming"):
-    if not ODDS_API_KEY:
-        return None
-    url = f"https://api.the-odds-api.com/v4/sports/{deporte}/odds/?apiKey={ODDS_API_KEY}&regions=eu&markets=h2h"
-    try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as res:
-            if res.status == 200:
-                datos = await res.json()
-                cuotas = []
-                for evento in datos:
-                    for bm in evento.get('bookmakers', []):
-                        for mk in bm.get('markets', []):
-                            for outcome in mk.get('outcomes', []):
-                                cuotas.append(outcome.get('price', 0))
-                if cuotas:
-                    return max(cuotas)
-    except Exception:
-        pass
-    return None
-
-def calcular_ev(supercuota, cuota_referencia_mercado):
-    probabilidad_real = 1 / cuota_referencia_mercado
+def calcular_ev(supercuota, cuota_referencia_base):
+    if cuota_referencia_base <= 1.0:
+        return 0.0
+    probabilidad_real = 1 / cuota_referencia_base
     ev = (probabilidad_real * supercuota) - 1
     return round(ev * 100, 2)
 
@@ -88,7 +69,7 @@ async def enviar_telegram(session, mensaje):
         log(f"Error enviando mensaje a Telegram: {e}")
 
 def extraer_cuotas_limpias(texto):
-    """Filtra importes en euros (€) e identificadores numéricos secundaciones."""
+    """Filtra importes en euros (€) e identificadores secundarios."""
     texto_sin_euros = re.sub(r'\b\d+[\.,]?\d*\s*€', '', texto)
     numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_sin_euros)
     cuotas_validas = []
@@ -104,8 +85,18 @@ def extraer_cuotas_limpias(texto):
 async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
     nuevas = False
     try:
-        # Priorizar contenedores específicos de tarjetas y ofertas principales
-        elementos = await page.query_selector_all('div[class*="Boost"], div[class*="Promo"], div[class*="Offer"], article, section, div')
+        # 1. Espera activa para hidratar Custom Elements en Bet365 y casas con SPA
+        if "bet365" in url_actual.lower():
+            try:
+                await page.wait_for_selector('div, article, section', timeout=4000)
+                # Scroll para detonar la carga diferida del banner de aumentos
+                await page.evaluate("window.scrollBy(0, 200);")
+                await page.wait_for_timeout(1500)
+            except Exception:
+                pass
+
+        # Seleccionar contenedores del DOM
+        elementos = await page.query_selector_all('article, section, div[class*="boost"], div[class*="promo"], div[class*="offer"], div')
         
         for el in elementos:
             try:
@@ -113,17 +104,19 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                 texto_limpio = texto.strip()
                 
                 if any(palabra in texto_limpio.lower() for palabra in keywords):
-                    if 5 < len(texto_limpio) < 250:
+                    if 5 < len(texto_limpio) < 300:
                         cuotas = extraer_cuotas_limpias(texto_limpio)
 
                         if len(cuotas) >= 1:
-                            # Seleccionar la cuota más alta o relevante de la tarjeta específica
                             supercuota_val = max(cuotas)
                             
-                            # Referencia estimada previa (20% inferior si no hay cuota doble en el texto)
-                            cuota_referencia = min(cuotas) if len(cuotas) > 1 else round(supercuota_val * 0.8, 2)
+                            # Determinación precisa de la cuota base de referencia
+                            if len(cuotas) > 1:
+                                cuota_referencia = min(cuotas)
+                            else:
+                                cuota_referencia = round(supercuota_val * 0.75, 2)
 
-                            texto_resumen = texto_limpio[:50].replace('\n', ' ')
+                            texto_resumen = texto_limpio[:60].replace('\n', ' ')
                             log(f"  📌 Detectado en {nombre_casa}: '{texto_resumen}...' | Cuota: {supercuota_val}")
 
                             id_oferta = f"{nombre_casa}_{texto_limpio[:25]}_{supercuota_val}"
@@ -161,7 +154,7 @@ async def rastrear():
 
     async with aiohttp.ClientSession() as session:
         async with async_playwright() as p:
-            log("🚀 Iniciando navegador Chromium con enmascaramiento de IP/VPN...")
+            log("🚀 Iniciando Chromium con enmascaramiento anti-detección...")
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -182,7 +175,7 @@ async def rastrear():
             )
 
             page = await context.new_page()
-            page.set_default_timeout(5000)
+            page.set_default_timeout(6000)
 
             # Inyección para ocultar automatización de Playwright
             await page.add_init_script("""
@@ -194,10 +187,10 @@ async def rastrear():
             for nombre_casa, url in casas.items():
                 log(f"🔍 Escaneando {nombre_casa} ({url})...")
                 try:
-                    await page.goto(url, timeout=7000, wait_until="domcontentloaded")
+                    await page.goto(url, timeout=8000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(1000)
 
-                    # Intentar cerrar el banner de cookies
+                    # Intentar cerrar el banner de cookies de forma limpia
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar y cerrar"), button:has-text("Aceptar")')
                         if cookie_btn:
@@ -206,11 +199,8 @@ async def rastrear():
                     except Exception:
                         pass
 
-                    await page.evaluate("window.scrollBy(0, 400);")
-                    await page.wait_for_timeout(1500)
-
-                    alerta_general = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
-                    if alerta_general:
+                    alerta = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
+                    if alerta:
                         nuevas_alertas = True
 
                 except Exception as e:
