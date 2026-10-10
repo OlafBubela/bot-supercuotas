@@ -13,31 +13,31 @@ user_id = "865364645"
 HISTORIAL_FILE = "alertas_definitivo.json"
 SCREENSHOT_PATH = "oferta_detectada.png"
 
-# Casas estables que no dan problemas de baneo de IP en GitHub Actions
+# Configuración de casas de apuestas estables
 CONFIG_CASAS = {
     "Winamax": {
         "url": "https://www.winamax.es/apuestas-deportivas",
-        "keywords": ["gran supercuota"],
+        "keywords": ["gran supercuota", "supercuota"],
         "blacklist": ["mymatch", "combinada"],
     },
     "Casino Gran Madrid": {
         "url": "https://www.casinogranmadridonline.es/apuestas-deportivas/",
-        "keywords": ["apuesta del día", "apuestas del día"],
+        "keywords": ["apuesta del día", "apuestas del día", "supercuota"],
         "blacklist": ["combinada"],
     },
     "Betfair": {
-        "url": "https://www.betfair.es/sport/football",
-        "keywords": ["supercuota"],
-        "blacklist": ["combipartido", "combinada"],
+        "url": "https://www.betfair.es/sport/",
+        "keywords": ["supercuota", "supercuotas", "cuota mejorada", "cuotas mejoradas", "precio mejorado"],
+        "blacklist": ["combipartido"],
     },
     "Paf": {
         "url": "https://www.paf.es/es/sportsbook",
-        "keywords": ["cuotas mejoradas", "cuota mejorada"],
+        "keywords": ["cuotas mejoradas", "cuota mejorada", "supercuota"],
         "blacklist": ["combinada", "crea tu apuesta"],
     },
     "Betway": {
         "url": "https://betway.es/es/esports",
-        "keywords": ["mega cuota", "megacuota"],
+        "keywords": ["mega cuota", "megacuota", "supercuota"],
         "blacklist": ["combinada"],
     },
     "Interwetten": {
@@ -82,7 +82,7 @@ def extraer_cuotas_limpias(texto):
     for n in numeros:
         try:
             val = float(n.replace(',', '.'))
-            if 1.15 <= val <= 15.00:
+            if 1.15 <= val <= 25.00:
                 cuotas_validas.append(val)
         except ValueError:
             continue
@@ -118,10 +118,16 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
     blacklist = config["blacklist"]
 
     try:
-        elementos = await page.query_selector_all('article, section, button, div[class*="boost"], div[class*="promo"], div[class*="offer"], div')
+        elementos = await page.query_selector_all(
+            'article, section, button, a, [class*="boost"], [class*="promo"], '
+            '[class*="offer"], [class*="runner"], [class*="card"], [class*="banner"], div'
+        )
         
         for el in elementos:
             try:
+                if not await el.is_visible():
+                    continue
+
                 texto = await el.inner_text()
                 texto_limpio = texto.strip()
                 texto_lower = texto_limpio.lower()
@@ -130,7 +136,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                     if any(bl in texto_lower for bl in blacklist):
                         continue
 
-                    if 5 < len(texto_limpio) < 400:
+                    if 5 < len(texto_limpio) < 500:
                         cuotas = extraer_cuotas_limpias(texto_limpio)
 
                         if len(cuotas) >= 1:
@@ -207,10 +213,10 @@ async def rastrear():
                 log(f"🔍 Escaneando {nombre_casa}...")
                 try:
                     await page.goto(config['url'], timeout=8000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(2000)
 
                     try:
-                        cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Aceptar y cerrar")')
+                        cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Aceptar y cerrar"), button:has-text("Allow all")')
                         if cookie_btn:
                             await cookie_btn.click(timeout=800)
                     except Exception:
