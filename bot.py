@@ -156,7 +156,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                 
                 # 1. Filtro estricto por nombres reales de la casa
                 if any(kw in texto_lower for kw in keywords):
-                    # 2. Descartar si incluye términos de combinadas/creador de apuestas
+                    # 2. Descartar si incluye términos de combinadas
                     if any(bl in texto_lower for bl in blacklist):
                         continue
 
@@ -173,4 +173,119 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                             id_oferta = f"{nombre_casa}_{texto_limpio[:20]}_{supercuota_val}"
                             
                             if id_oferta in historial:
-                                log(f"
+                                log(f"  ⏩ Omitida: Ya registrada en el historial.")
+                                continue
+
+                            ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
+                            
+                            # Captura de pantalla de la tarjeta de la apuesta
+                            try:
+                                await el.screenshot(path=SCREENSHOT_PATH)
+                            except Exception:
+                                await page.screenshot(path=SCREENSHOT_PATH)
+
+                            mensaje = (
+                                f"🎯 **NUEVA SUPERCUOTA REAL DETECTADA**\n\n"
+                                f"🏦 **Casa:** {nombre_casa.upper()}\n"
+                                f"📌 **Apuesta:** {texto_limpio.replace(chr(10), ' ')}\n"
+                                f"⚡ **Cuota Mejorada:** {supercuota_val}\n"
+                                f"📊 **Cuota Base Ref:** {cuota_referencia}\n"
+                                f"📈 **Valor Esperado (+EV):** +{ev_porcentaje}%\n\n"
+                                f"🔗 [Ir a la oferta]({config['url']})"
+                            )
+
+                            await enviar_telegram_con_foto(session, mensaje, SCREENSHOT_PATH)
+                            log(f"  ✅ ¡ALERTA Y CAPTURA ENVIADAS A TELEGRAM!")
+                            historial.add(id_oferta)
+                            nuevas = True
+            except Exception:
+                continue
+    except Exception as e:
+        log(f"  ⚠️ Error escaneando {nombre_casa}: {e}")
+            
+    return nuevas
+
+async def rastrear():
+    historial = cargar_historial()
+    nuevas_alertas = False
+
+    async with aiohttp.ClientSession() as session:
+        async with async_playwright() as p:
+            log("🚀 Iniciando Chromium con enmascaramiento anti-detección...")
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-infobars',
+                    '--window-position=0,0',
+                    '--ignore-certificate-errors',
+                    '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                ]
+            )
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+                viewport={'width': 1280, 'height': 800},
+                locale="es-ES",
+                timezone_id="Europe/Madrid"
+            )
+
+            page = await context.new_page()
+            page.set_default_timeout(6000)
+
+            await page.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            """)
+
+            log("🤖 Comienza el recorrido específico por las casas de apuestas...")
+
+            for nombre_casa, config in CONFIG_CASAS.items():
+                log(f"🔍 Escaneando {nombre_casa} ({config['url']})...")
+                try:
+                    await page.goto(config['url'], timeout=8000, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(1000)
+
+                    try:
+                        cookie_btn = await page.query_selector('button:has-text("Aceptar y cerrar"), button:has-text("Aceptar")')
+                        if cookie_btn:
+                            await cookie_btn.click(timeout=1000)
+                            await page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+
+                    # Búsqueda interactiva reforzada para William Hill
+                    if config.get("wh_search"):
+                        for termino in config.get("search_terms", []):
+                            try:
+                                log(f"  🔎 Interactuando con el buscador de William Hill: '{termino}'...")
+                                search_input = await page.query_selector('input[type="search"], input[type="text"], input[placeholder*="Buscar"]')
+                                if search_input:
+                                    await search_input.click()
+                                    await search_input.fill("")
+                                    await search_input.type(termino, delay=80)
+                                    await page.keyboard.press("Enter")
+                                    await page.wait_for_timeout(2500)
+                                    
+                                    alerta_wh = await escaneo_elementos_pagina(page, session, nombre_casa, config, historial)
+                                    if alerta_wh:
+                                        nuevas_alertas = True
+                            except Exception as e_wh:
+                                log(f"  ⚠️ Error interactuando con la búsqueda de {termino}: {e_wh}")
+
+                    alerta = await escaneo_elementos_pagina(page, session, nombre_casa, config, historial)
+                    if alerta:
+                        nuevas_alertas = True
+
+                except Exception as e:
+                    log(f"  ⚡ Salto seguro por timeout en {nombre_casa}: {e}")
+
+            await browser.close()
+            log("🏁 Navegador cerrado correctamente.")
+
+    if nuevas_alertas:
+        guardar_historial(historial)
+        log("💾 Historial de alertas actualizado.")
+
+if __name__ == "__main__":
+    asyncio.run(rastrear())
