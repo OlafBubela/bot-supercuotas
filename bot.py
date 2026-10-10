@@ -10,7 +10,6 @@ from playwright.async_api import async_playwright
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
 user_id = "865364645"
 
-# Reseteamos el archivo a v3 para que no ignore ofertas registradas en pruebas pasadas
 HISTORIAL_FILE = "alertas_v3.json"
 SCREENSHOT_PATH = "oferta_detectada.png"
 
@@ -141,13 +140,16 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
     try:
         if "bet365" in nombre_casa.lower():
             try:
-                await page.wait_for_selector('div, article, section, button', timeout=3000)
-                await page.evaluate("window.scrollBy(0, 400);")
-                await page.wait_for_timeout(1000)
+                # Scroll e interacción explícita para renderizar el componente dinámico de Bet365
+                await page.wait_for_selector('body', timeout=4000)
+                await page.mouse.move(300, 300)
+                await page.evaluate("window.scrollBy(0, 500);")
+                await page.wait_for_timeout(2000)
             except Exception:
                 pass
 
-        elementos = await page.query_selector_all('article, section, button, div[class*="boost"], div[class*="promo"], div[class*="offer"], div')
+        # Búsqueda global de elementos contenedor
+        elementos = await page.query_selector_all('article, section, button, div')
         
         for el in elementos:
             try:
@@ -155,13 +157,11 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                 texto_limpio = texto.strip()
                 texto_lower = texto_limpio.lower()
                 
-                # 1. Coincidencia de palabra clave
                 if any(kw in texto_lower for kw in keywords):
-                    # 2. Descartar si contiene combinadas/parlay
                     if any(bl in texto_lower for bl in blacklist):
                         continue
 
-                    max_len = 600 if "bet365" in nombre_casa.lower() else 350
+                    max_len = 800 if "bet365" in nombre_casa.lower() else 350
 
                     if 5 < len(texto_limpio) < max_len:
                         cuotas = extraer_cuotas_limpias(texto_limpio)
@@ -171,7 +171,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                             cuota_referencia = min(cuotas) if len(cuotas) > 1 else round(supercuota_val * 0.8, 2)
 
                             texto_resumen = texto_limpio[:50].replace('\n', ' ')
-                            log(f"  📌 Oferta detectada en {nombre_casa}: '{texto_resumen}...' | Cuota: {supercuota_val}")
+                            log(f"  🎯 ¡SUPERAUMENTO ENCONTRADO! {nombre_casa}: '{texto_resumen}...' | Cuota: {supercuota_val}")
 
                             id_oferta = f"{nombre_casa}_{texto_limpio[:20]}_{supercuota_val}"
                             
@@ -181,7 +181,6 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
 
                             ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
                             
-                            # Captura de pantalla del elemento concreto
                             try:
                                 await el.screenshot(path=SCREENSHOT_PATH)
                             except Exception:
@@ -203,6 +202,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                             nuevas = True
             except Exception:
                 continue
+
     except Exception as e:
         log(f"  ⚠️ Error escaneando {nombre_casa}: {e}")
             
@@ -245,9 +245,9 @@ async def rastrear():
             for nombre_casa, config in CONFIG_CASAS.items():
                 log(f"🔍 Escaneando {nombre_casa} ({config['url']})...")
                 try:
-                    timeout_casa = 3500 if nombre_casa == "Winamax" else 6000
-                    await page.goto(config['url'], timeout=timeout_casa, wait_until="commit")
-                    await page.wait_for_timeout(800)
+                    timeout_casa = 3500 if nombre_casa == "Winamax" else 7000
+                    await page.goto(config['url'], timeout=timeout_casa, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(1000)
 
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar y cerrar"), button:has-text("Aceptar")')
