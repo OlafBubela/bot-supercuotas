@@ -90,11 +90,7 @@ async def enviar_telegram_con_foto(session, mensaje, foto_path):
 
 async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
     nuevas = False
-    # Capturamos bloques más amplios y específicos
-    elementos = await page.query_selector_all('article, div[class*="event"], div[class*="selection"], div[class*="market"], li, section')
-    if not elementos:
-        elementos = await page.query_selector_all('span, div, a, h3, p')
-
+    elementos = await page.query_selector_all('div, article, section, li, a, span')
     coincidencias = 0
     
     for el in elementos:
@@ -102,8 +98,8 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
             texto = await el.inner_text()
             texto_limpio = texto.strip()
             
-            if any(palabra in texto_limpio.lower() for palabra in keywords):
-                if 5 < len(texto_limpio) < 500:
+            if any(palabra in texto_limpio.lower() for palabra in keywords) or (" real madrid" in texto_limpio.lower() and "ganará" in texto_limpio.lower()):
+                if 5 < len(texto_limpio) < 600:
                     numeros = re.findall(r'\b\d+[\.,]\d+\b', texto_limpio)
                     if len(numeros) >= 1:
                         float_numeros = [float(n.replace(',', '.')) for n in numeros if 1.10 <= float(n.replace(',', '.')) <= 100.0]
@@ -177,50 +173,76 @@ async def rastrear():
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
-                args=['--disable-blink-features=AutomationControlled', '--no-sandbox']
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-infobars',
+                    '--window-size=1920,1080'
+                ]
             )
             context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={'width': 1280, 'height': 800}
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                viewport={'width': 1920, 'height': 1080},
+                locale="es-ES"
             )
+            
+            # Script de camuflaje anti-bot
+            await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
             page = await context.new_page()
 
-            # No abortamos imágenes totalmente en la búsqueda de William Hill para permitir la carga completa del DOM
-            print("🤖 Iniciando rastreo con espera dinámica de renderizado...", flush=True)
+            print("🤖 Iniciando rastreo con camuflaje mejorado y escaneo amplio...", flush=True)
 
             for nombre_casa, url in casas.items():
                 print(f"🔍 Escaneando {nombre_casa}...", flush=True)
                 try:
-                    await page.goto(url, timeout=25000, wait_until="networkidle")
+                    await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2000)
 
                     try:
-                        cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Accept"), #accept-cookies')
+                        cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Accept"), #accept-cookies, #onetrust-accept-btn-handler')
                         if cookie_btn:
-                            await cookie_btn.click(timeout=1000)
+                            await cookie_btn.click(timeout=1500)
                     except Exception:
                         pass
 
                     if nombre_casa == "William Hill":
                         for termino in TERMINOS_BUSQUEDA:
                             try:
-                                print(f"  🔎 Navegando a búsqueda '{termino}' en William Hill...", flush=True)
-                                search_url = f"https://sports.williamhill.es/betting/es-es/search?term={termino.replace(' ', '%20')}"
-                                await page.goto(search_url, timeout=25000, wait_until="networkidle")
+                                print(f"  🔎 Buscando '{termino}' con simulación de usuario en William Hill...", flush=True)
                                 
-                                # Esperar dinámicamente a que aparezcan tarjetas de eventos en pantalla
-                                try:
-                                    await page.wait_for_selector('article, div[class*="event"], div[class*="selection"], .search-results', timeout=6000)
-                                except Exception:
+                                # Intentamos abrir el modal de búsqueda si existe el botón
+                                search_btn = await page.query_selector('button[aria-label*="Search"], [class*="search"], [id*="search"]')
+                                if search_btn:
+                                    await search_btn.click(timeout=2000)
+                                    await page.wait_for_timeout(1000)
+
+                                # Buscamos cualquier input disponible
+                                search_input = await page.query_selector('input[type="search"], input[type="text"], input[placeholder*="Buscar"]')
+                                if search_input:
+                                    await search_input.fill("")
+                                    await search_input.type(termino, delay=100)
+                                    await page.keyboard.press('Enter')
                                     await page.wait_for_timeout(4000)
 
-                                alerta_busqueda = await escaneo_elementos_pagina(page, session, nombre_casa, search_url, historial)
-                                if alerta_busqueda:
-                                    nuevas_alertas = True
+                                    alerta_busqueda = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
+                                    if alerta_busqueda:
+                                        nuevas_alertas = True
+                                else:
+                                    # Fallback a navegación URL
+                                    search_url = f"https://sports.williamhill.es/betting/es-es/search?term={termino.replace(' ', '%20')}"
+                                    await page.goto(search_url, timeout=25000, wait_until="domcontentloaded")
+                                    await page.wait_for_timeout(4000)
+                                    alerta_busqueda = await escaneo_elementos_pagina(page, session, nombre_casa, search_url, historial)
+                                    if alerta_busqueda:
+                                        nuevas_alertas = True
+
                             except Exception as e_search:
-                                print(f"  ⚠️ Error en la búsqueda directa de {termino}: {e_search}", flush=True)
+                                print(f"  ⚠️ Error procesando {termino}: {e_search}", flush=True)
 
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3);")
-                    await page.wait_for_timeout(1000)
+                    await page.wait_for_timeout(1500)
 
                     hubo_alerta = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
                     if hubo_alerta:
