@@ -139,16 +139,36 @@ async def rastrear():
             log("🚀 Iniciando rastreo...")
             browser = await p.chromium.launch(
                 headless=True,
-                args=['--disable-blink-features=AutomationControlled', '--no-sandbox', '--disable-setuid-sandbox']
+                args=[
+                    '--disable-blink-features=AutomationControlled',
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox'
+                ]
             )
-            context = await browser.new_context(viewport={'width': 1280, 'height': 800}, locale="es-ES")
+            # Contexto de navegador completamente camuflado como usuario real
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+                viewport={'width': 1366, 'height': 768},
+                locale="es-ES",
+                timezone_id="Europe/Madrid"
+            )
             page = await context.new_page()
+
+            await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
             for nombre_casa, config in CONFIG_CASAS.items():
                 log(f"🔍 Escaneando {nombre_casa}...")
                 try:
-                    await page.goto(config['url'], timeout=8000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500)
+                    # Timeout rápido de 4 segundos para Winamax
+                    timeout_val = 4000 if nombre_casa == "Winamax" else 10000
+                    await page.goto(config['url'], timeout=timeout_val, wait_until="commit")
+                    
+                    # Pausa de renderizado en Bet365 con movimiento de ratón
+                    if "bet365" in nombre_casa.lower():
+                        await page.wait_for_timeout(3500)
+                        await page.mouse.move(200, 200)
+                        await page.evaluate("window.scrollBy(0, 300);")
+                        await page.wait_for_timeout(1000)
 
                     if config.get("wh_search"):
                         for termino in config.get("search_terms", []):
@@ -158,9 +178,9 @@ async def rastrear():
                                 if search_input:
                                     await search_input.click()
                                     await search_input.fill("")
-                                    await search_input.type(termino, delay=80)
+                                    await search_input.type(termino, delay=100)
                                     await page.keyboard.press("Enter")
-                                    await page.wait_for_timeout(2000)
+                                    await page.wait_for_timeout(2500)
                                     
                                     if await escaneo_elementos_pagina(page, session, nombre_casa, config, historial):
                                         nuevas_alertas = True
