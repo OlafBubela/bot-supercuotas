@@ -34,7 +34,6 @@ keywords = [
     'cuota épica', 'cuotas insuperables', 'épica', 'insuperable', 'cuota epica'
 ]
 
-# Términos que buscará activamente en los buscadores internos de las webs
 TERMINOS_BUSQUEDA = ['Insuperable', 'Cuota Épica']
 
 def cargar_historial():
@@ -87,7 +86,7 @@ async def enviar_telegram_con_foto(session, mensaje, foto_path):
         async with session.post(url, data=data) as resp:
             pass
     except Exception as e:
-        print(f"Error al enviar foto a Telegram: {e}")
+        print(f"Error al enviar foto a Telegram: {e}", flush=True)
 
 async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, historial):
     nuevas = False
@@ -117,6 +116,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                             id_oferta = f"{nombre_casa}_{texto_limpio[:40]}_{supercuota_val}"
                             
                             if id_oferta in historial:
+                                print(f"⏩ Oferta repetida en {nombre_casa}. Ya en historial.", flush=True)
                                 continue
 
                             cuota_mercado_max = await obtener_max_cuota_mercado(session)
@@ -125,6 +125,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                             ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
                             
                             if ev_porcentaje <= 0:
+                                print(f"⚠️ Oferta descartada en {nombre_casa}: +EV {ev_porcentaje}% no rentable.", flush=True)
                                 continue
 
                             foto_filename = f"screenshot_{nombre_casa}.png"
@@ -147,7 +148,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, url_actual, histo
                             )
 
                             await enviar_telegram_con_foto(session, mensaje, foto_filename)
-                            print(f"Alerta enviada para {nombre_casa} (+EV: +{ev_porcentaje}%).")
+                            print(f"✅ Alerta enviada para {nombre_casa} (+EV: +{ev_porcentaje}%).", flush=True)
                             
                             historial.add(id_oferta)
                             nuevas = True
@@ -174,18 +175,28 @@ async def rastrear():
 
             await page.route("**/*.{png,jpg,jpeg,svg,webp,mp4,woff,woff2}", lambda route: route.abort())
 
-            print("🤖 Comprobando portadas, buscadores internos y eventos...")
+            print("🤖 Iniciando rastreo...", flush=True)
 
             for nombre_casa, url in casas.items():
+                print(f"🔍 Escaneando {nombre_casa}...", flush=True)
                 try:
-                    await page.goto(url, timeout=25000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000)
+                    await page.goto(url, timeout=20000, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(1500)
 
-                    # BÚSQUEDA INTERNA EN CASAS CON BUSCADOR (William Hill, etc.)
+                    # Intentar aceptar cookies si estorban
+                    try:
+                        cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Accept"), #accept-cookies')
+                        if cookie_btn:
+                            await cookie_btn.click(timeout=1000)
+                    except Exception:
+                        pass
+
+                    # Búsqueda específica en William Hill
                     if nombre_casa == "William Hill":
                         for termino in TERMINOS_BUSQUEDA:
                             try:
-                                search_btn = await page.query_selector('button[aria-label*="Search"], .search-trigger, .header__search')
+                                print(f"  🔎 Buscando '{termino}' en {nombre_casa}...", flush=True)
+                                search_btn = await page.query_selector('button[aria-label*="Search"], .search-trigger, .header__search, [data-test-id*="search"]')
                                 if search_btn:
                                     await search_btn.click(timeout=1000)
                                     await page.wait_for_timeout(500)
@@ -200,43 +211,24 @@ async def rastrear():
                                     if alerta_busqueda:
                                         nuevas_alertas = True
                             except Exception as e_search:
-                                print(f"Error en búsqueda de {termino} en {nombre_casa}: {e_search}")
+                                print(f"  ⚠️ Error buscando {termino}: {e_search}", flush=True)
 
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3);")
                     await page.wait_for_timeout(1000)
 
-                    # 1. Escaneo de la página principal / sección actual
+                    # Escaneo de la página principal
                     hubo_alerta = await escaneo_elementos_pagina(page, session, nombre_casa, url, historial)
                     if hubo_alerta:
                         nuevas_alertas = True
 
-                    # 2. Navegación a eventos internos de fútbol/deportes
-                    enlaces_eventos = await page.query_selector_all('a[href*="event"], a[href*="partido"], a[href*="match"]')
-                    urls_partidos = []
-                    for link in enlaces_eventos[:3]:
-                        href = await link.get_attribute('href')
-                        if href and href.startswith('http'):
-                            urls_partidos.append(href)
-
-                    for url_partido in set(urls_partidos):
-                        try:
-                            await page.goto(url_partido, timeout=15000, wait_until="domcontentloaded")
-                            await page.wait_for_timeout(1500)
-
-                            alerta_interna = await escaneo_elementos_pagina(page, session, nombre_casa, url_partido, historial)
-                            if alerta_interna:
-                                nuevas_alertas = True
-                        except Exception:
-                            continue
-
                 except Exception as e:
-                    print(f"Error o tiempo agotado en {nombre_casa}: {e}")
+                    print(f"❌ Tiempo agotado o error en {nombre_casa}: {e}", flush=True)
 
             await browser.close()
 
     if nuevas_alertas:
         guardar_historial(historial)
-        print("💾 Historial de alertas actualizado.")
+        print("💾 Historial de alertas actualizado.", flush=True)
 
 if __name__ == "__main__":
     asyncio.run(rastrear())
