@@ -13,7 +13,7 @@ user_id = "865364645"
 HISTORIAL_FILE = "alertas_definitivo.json"
 SCREENSHOT_PATH = "oferta_detectada.png"
 
-# Casas de apuestas estables (sin Bet365 ni William Hill)
+# Casas estables que no dan problemas de baneo de IP en GitHub Actions
 CONFIG_CASAS = {
     "Winamax": {
         "url": "https://www.winamax.es/apuestas-deportivas",
@@ -206,10 +206,9 @@ async def rastrear():
             for nombre_casa, config in CONFIG_CASAS.items():
                 log(f"🔍 Escaneando {nombre_casa}...")
                 try:
-                    await page.goto(config['url'], timeout=6000, wait_until="domcontentloaded")
+                    await page.goto(config['url'], timeout=8000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(1500)
 
-                    # Aceptar cookies rápido si sale botón
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Aceptar y cerrar")')
                         if cookie_btn:
