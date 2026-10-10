@@ -6,7 +6,6 @@ import time
 import aiohttp
 from playwright.async_api import async_playwright
 
-# Configuración de Telegram
 token = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
 user_id = "865364645"
 
@@ -26,7 +25,7 @@ CONFIG_CASAS = {
     },
     "Betfair": {
         "url": "https://www.betfair.es/sport/",
-        "keywords": ["supercuota", "supercuotas", "cuota mejorada", "cuotas mejoradas", "precio mejorado"],
+        "keywords": ["supercuota", "supercuotas", "cuota mejorada", "cuotas mejoradas", "precio mejorado", "aumento"],
         "blacklist": ["combipartido"],
     },
     "Paf": {
@@ -98,7 +97,8 @@ async def enviar_telegram_con_foto(session, mensaje, ruta_imagen=None):
         try:
             async with session.post(url, data=data, timeout=aiohttp.ClientTimeout(total=10)):
                 pass
-            os.remove(ruta_imagen)
+            if "debug_" not in ruta_imagen:
+                os.remove(ruta_imagen)
             return
         except Exception as e:
             log(f"Error enviando foto a Telegram: {e}")
@@ -186,7 +186,7 @@ async def rastrear():
 
     async with aiohttp.ClientSession() as session:
         async with async_playwright() as p:
-            log("🚀 Iniciando rastreo ultra-rápido...")
+            log("🚀 Iniciando rastreo con diagnóstico de Betfair...")
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -211,9 +211,8 @@ async def rastrear():
             for nombre_casa, config in CONFIG_CASAS.items():
                 log(f"🔍 Escaneando {nombre_casa}...")
                 try:
-                    # Timeout estricto de 4 segundos: si no carga rápido, no se queda atascado
-                    await page.goto(config['url'], timeout=4000, wait_until="commit")
-                    await page.wait_for_timeout(1000)
+                    await page.goto(config['url'], timeout=6000, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2000)
 
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar"), button:has-text("Aceptar y cerrar"), button:has-text("Allow all")')
@@ -222,11 +221,17 @@ async def rastrear():
                     except Exception:
                         pass
 
+                    # CAPTURA DE DIAGNÓSTICO EN TELEGRAM PARA BETFAIR
+                    if nombre_casa == "Betfair":
+                        debug_img = "debug_betfair.png"
+                        await page.screenshot(path=debug_img, full_page=False)
+                        await enviar_telegram_con_foto(session, "📸 **DIAGNÓSTICO BETFAIR:** Esto es lo que está viendo el bot en pantalla:", debug_img)
+
                     if await escaneo_elementos_pagina(page, session, nombre_casa, config, historial):
                         nuevas_alertas = True
 
                 except Exception as e:
-                    log(f"  ⚡ Salto rápido por timeout en {nombre_casa}: avanzando...")
+                    log(f"  ⚡ Salto rápido en {nombre_casa}: {e}")
 
             await browser.close()
             log("🏁 Proceso finalizado.")
