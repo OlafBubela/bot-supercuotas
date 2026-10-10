@@ -20,18 +20,18 @@ CONFIG_CASAS = {
         "blacklist": ["parlay", "combinada", "crea tu apuesta", "aumento de parlay"],
         "wh_search": False
     },
+    "Winamax": {
+        "url": "https://www.winamax.es/apuestas-deportivas",
+        "keywords": ["gran supercuota"],
+        "blacklist": ["mymatch", "combinada"],
+        "wh_search": False
+    },
     "William Hill": {
         "url": "https://sports.williamhill.es/betting/es-es",
         "keywords": ["épica", "insuperable", "cuota épica", "cuotas épicas"],
         "blacklist": ["crea tu apuesta", "combinada", "3 o más"],
         "wh_search": True,
         "search_terms": ["épica", "insuperable"]
-    },
-    "Winamax": {
-        "url": "https://www.winamax.es/apuestas-deportivas",
-        "keywords": ["gran supercuota", "supercuota"],
-        "blacklist": ["mymatch", "combinada"],
-        "wh_search": False
     },
     "Casino Gran Madrid": {
         "url": "https://www.casinogranmadridonline.es/apuestas-deportivas/",
@@ -138,11 +138,12 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
     blacklist = config["blacklist"]
 
     try:
+        # En Bet365 forzamos scroll dinámico profundo para desplegar superaumentos en partidos
         if "bet365" in nombre_casa.lower():
             try:
-                await page.wait_for_selector('div, article, section', timeout=4000)
-                await page.evaluate("window.scrollBy(0, 250);")
-                await page.wait_for_timeout(1500)
+                await page.wait_for_selector('div, article, section', timeout=3000)
+                await page.evaluate("window.scrollBy(0, 500);")
+                await page.wait_for_timeout(1200)
             except Exception:
                 pass
 
@@ -154,13 +155,16 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                 texto_limpio = texto.strip()
                 texto_lower = texto_limpio.lower()
                 
-                # 1. Filtro estricto por nombres reales de la casa
+                # 1. Filtro estricto por coincidencia exacta de la palabra clave de la casa
                 if any(kw in texto_lower for kw in keywords):
-                    # 2. Descartar si incluye términos de combinadas
+                    # 2. Descartar si contiene combinadas o parlay
                     if any(bl in texto_lower for bl in blacklist):
                         continue
 
-                    if 5 < len(texto_limpio) < 200:
+                    # Para Bet365 permitimos bloques más extensos si está dentro de un partido
+                    max_len = 600 if "bet365" in nombre_casa.lower() else 350
+
+                    if 5 < len(texto_limpio) < max_len:
                         cuotas = extraer_cuotas_limpias(texto_limpio)
 
                         if len(cuotas) >= 1:
@@ -168,7 +172,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
                             cuota_referencia = min(cuotas) if len(cuotas) > 1 else round(supercuota_val * 0.8, 2)
 
                             texto_resumen = texto_limpio[:50].replace('\n', ' ')
-                            log(f"  📌 Oferta real detectada en {nombre_casa}: '{texto_resumen}...' | Cuota: {supercuota_val}")
+                            log(f"  📌 Oferta detectada en {nombre_casa}: '{texto_resumen}...' | Cuota: {supercuota_val}")
 
                             id_oferta = f"{nombre_casa}_{texto_limpio[:20]}_{supercuota_val}"
                             
@@ -178,7 +182,7 @@ async def escaneo_elementos_pagina(page, session, nombre_casa, config, historial
 
                             ev_porcentaje = calcular_ev(supercuota_val, cuota_referencia)
                             
-                            # Captura de pantalla de la tarjeta de la apuesta
+                            # Realiza la captura de pantalla directa del elemento del superaumento
                             try:
                                 await el.screenshot(path=SCREENSHOT_PATH)
                             except Exception:
@@ -232,7 +236,6 @@ async def rastrear():
             )
 
             page = await context.new_page()
-            page.set_default_timeout(6000)
 
             await page.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
@@ -243,29 +246,30 @@ async def rastrear():
             for nombre_casa, config in CONFIG_CASAS.items():
                 log(f"🔍 Escaneando {nombre_casa} ({config['url']})...")
                 try:
-                    await page.goto(config['url'], timeout=8000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1000)
+                    timeout_casa = 3500 if nombre_casa == "Winamax" else 6000
+                    await page.goto(config['url'], timeout=timeout_casa, wait_until="commit")
+                    await page.wait_for_timeout(800)
 
                     try:
                         cookie_btn = await page.query_selector('button:has-text("Aceptar y cerrar"), button:has-text("Aceptar")')
                         if cookie_btn:
-                            await cookie_btn.click(timeout=1000)
-                            await page.wait_for_timeout(500)
+                            await cookie_btn.click(timeout=800)
+                            await page.wait_for_timeout(300)
                     except Exception:
                         pass
 
-                    # Búsqueda interactiva reforzada para William Hill
+                    # Búsqueda interactiva en William Hill
                     if config.get("wh_search"):
                         for termino in config.get("search_terms", []):
                             try:
-                                log(f"  🔎 Interactuando con el buscador de William Hill: '{termino}'...")
+                                log(f"  🔎 Buscando '{termino}' en el buscador de William Hill...")
                                 search_input = await page.query_selector('input[type="search"], input[type="text"], input[placeholder*="Buscar"]')
                                 if search_input:
                                     await search_input.click()
                                     await search_input.fill("")
-                                    await search_input.type(termino, delay=80)
+                                    await search_input.type(termino, delay=60)
                                     await page.keyboard.press("Enter")
-                                    await page.wait_for_timeout(2500)
+                                    await page.wait_for_timeout(1500)
                                     
                                     alerta_wh = await escaneo_elementos_pagina(page, session, nombre_casa, config, historial)
                                     if alerta_wh:
