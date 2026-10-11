@@ -4,8 +4,8 @@ import aiohttp
 from playwright.async_api import async_playwright
 
 # Configuración de Telegram
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "TU_TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "TU_TELEGRAM_CHAT_ID")
+TELEGRAM_BOT_TOKEN = "8777299013:AAH8-gTT-_CTw2Ht0RRXW55jsPEGFh0_OuU"
+TELEGRAM_CHAT_ID = "865364645"
 
 # Nombres exactos de los aumentos para cada casa
 EXACT_AUMENTO_NAMES = {
