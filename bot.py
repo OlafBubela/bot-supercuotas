@@ -71,14 +71,12 @@ def parse_card_info(text_content):
     """Extrae evento, hora, mercado, cuotas y porcentaje exactos."""
     lines = [line.strip() for line in text_content.split('\n') if len(line.strip()) > 2]
     
-    # Extraer horas (ej: 20:45, 18:00, etc.)
     time_match = re.search(r'\b\d{1,2}:\d{2}\b', text_content)
     time_str = f" (Hoy {time_match.group(0)})" if time_match else ""
     
     match_title = lines[0] if lines else "Evento"
     market_description = lines[1] if len(lines) > 1 else "Apuesta especial"
     
-    # Buscar números decimales (cuotas)
     numbers = re.findall(r'\b\d+[\.,]\d+\b', text_content)
     numbers = [float(n.replace(',', '.')) for n in numbers if float(n.replace(',', '.')) > 1.01]
     
@@ -101,7 +99,7 @@ async def check_bookmaker(page, name, config):
         await page.goto(url, timeout=45000, wait_until="networkidle")
         await asyncio.sleep(3)
         
-        # Ocultar cookies
+        # Aceptar cookies
         try:
             cookie_btn = await page.query_selector("button:has-text('Aceptar'), #onetrust-accept-btn-handler")
             if cookie_btn:
@@ -124,14 +122,13 @@ async def check_bookmaker(page, name, config):
             
             filename = f"aumento_{name.lower()}.png"
             
-            # Recorte exacto a la tarjeta del banner
             if card_el:
                 await card_el.screenshot(path=filename)
             else:
                 body = await page.query_selector("main") or await page.query_selector("body")
                 await body.screenshot(path=filename, clip={"x": 250, "y": 150, "width": 780, "height": 450})
 
-            # FORMATO EXACTO A LA IMAGEN DE EJEMPLO
+            # Formato idéntico al ejemplo del canal
             caption = (
                 f"⚽ *{match_title}*{time_str}\n"
                 f"{market_desc}\n"
@@ -151,9 +148,14 @@ async def check_bookmaker(page, name, config):
 async def main():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
+        # Emulación estricta de localización en España para GitHub Actions
         context = await browser.new_context(
             viewport={'width': 1280, 'height': 800},
             locale='es-ES',
+            timezone_id='Europe/Madrid',
+            geolocation={'latitude': 40.416775, 'longitude': -3.703790},
+            permissions=['geolocation'],
+            extra_http_headers={'Accept-Language': 'es-ES,es;q=0.9'},
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
         )
         page = await context.new_page()
