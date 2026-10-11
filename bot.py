@@ -43,9 +43,9 @@ async def send_telegram_alert(text, screenshot_path=None):
                 
                 async with session.post(url, data=data) as resp:
                     if resp.status == 200:
-                        print(f"✅ Foto enviada a Telegram para: {text[:40]}...")
+                        print(f"OK: Foto enviada a Telegram para: {text[:40]}...")
                     else:
-                        print(f"❌ Error en Telegram API: {resp.status}")
+                        print(f"Error en Telegram API: {resp.status}")
     else:
         text_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         async with aiohttp.ClientSession() as session:
@@ -54,7 +54,7 @@ async def send_telegram_alert(text, screenshot_path=None):
 
 async def check_bookmaker(page, name, url):
     """Inspecciona la casa de apuestas filtrando únicamente por la denominación oficial de sus aumentos."""
-    print(f"🔍 Escaneando {name}...")
+    print(f"Escaneando {name}...")
     exact_names = EXACT_AUMENTO_NAMES.get(name, [])
     
     try:
@@ -68,7 +68,7 @@ async def check_bookmaker(page, name, url):
         found_matches = [term for term in exact_names if term in content_lower]
         
         if found_matches:
-            print(f"🎯 ¡AUMENTO REAL DETECTADO en {name}! Coincidencia: {found_matches}")
+            print(f"AUMENTO REAL DETECTADO en {name}! Coincidencia: {found_matches}")
             
             # Toma la captura de pantalla del aumento
             filename = f"aumento_{name.lower().replace(' ', '_')}.png"
@@ -85,10 +85,10 @@ async def check_bookmaker(page, name, url):
             if os.path.exists(filename):
                 os.remove(filename)
         else:
-            print(f"ℹ️ No hay aumentos oficiales activos en {name}.")
+            print(f"No hay aumentos oficiales activos en {name}.")
             
     except Exception as e:
-        print(f"⚠️ Error al revisar {name}: {e}")
+        print(f"Error al revisar {name}: {e}")
 
 async def main():
     async with async_playwright() as p:
