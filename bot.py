@@ -7,7 +7,7 @@ from playwright.async_api import async_playwright
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "TU_TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "TU_TELEGRAM_CHAT_ID")
 
-# Nombres exactos y exclusivos de los aumentos en cada casa para evitar falsos positivos
+# Nombres exactos de los aumentos para cada casa
 EXACT_AUMENTO_NAMES = {
     "Betfair": ["supercuota", "combi del día"],
     "Winamax": ["supercuota", "momo boost", "cuota mejorada"],
@@ -18,7 +18,6 @@ EXACT_AUMENTO_NAMES = {
     "Bwin": ["price boost", "supercuota bwin"]
 }
 
-# URLs directas de las secciones donde publican los aumentos
 BOOKMAKER_URLS = {
     "Betfair": "https://www.betfair.es/sport/promotions",
     "Winamax": "https://www.winamax.es/supercuotas",
@@ -30,7 +29,7 @@ BOOKMAKER_URLS = {
 }
 
 async def send_telegram_alert(text, screenshot_path=None):
-    """Envía la alerta a Telegram adjuntando la captura de pantalla del aumento."""
+    """Envía la alerta adjuntando la captura de pantalla."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     
     if screenshot_path and os.path.exists(screenshot_path):
@@ -53,7 +52,7 @@ async def send_telegram_alert(text, screenshot_path=None):
             await session.post(text_url, json=payload)
 
 async def check_bookmaker(page, name, url):
-    """Inspecciona la casa de apuestas filtrando únicamente por la denominación oficial de sus aumentos."""
+    """Revisa la casa de apuestas y envía foto si encuentra un aumento."""
     print(f"Escaneando {name}...")
     exact_names = EXACT_AUMENTO_NAMES.get(name, [])
     
@@ -64,20 +63,18 @@ async def check_bookmaker(page, name, url):
         content = await page.content()
         content_lower = content.lower()
         
-        # Filtra únicamente coincidencias exactas del nombre del aumento
         found_matches = [term for term in exact_names if term in content_lower]
         
         if found_matches:
-            print(f"AUMENTO REAL DETECTADO en {name}! Coincidencia: {found_matches}")
+            print(f"AUMENTO DETECTADO en {name}: {found_matches}")
             
-            # Toma la captura de pantalla del aumento
             filename = f"aumento_{name.lower().replace(' ', '_')}.png"
             await page.screenshot(path=filename, full_page=False)
             
             caption = (
                 f"🔥 **¡Aumento Detectado en {name}!**\n\n"
                 f"🏷️ **Sección:** {', '.join(found_matches).upper()}\n"
-                f"🔗 [Ir al aumento en {name}]({url})"
+                f"🔗 [Ir al aumento]({url})"
             )
             
             await send_telegram_alert(caption, filename)
@@ -85,7 +82,7 @@ async def check_bookmaker(page, name, url):
             if os.path.exists(filename):
                 os.remove(filename)
         else:
-            print(f"No hay aumentos oficiales activos en {name}.")
+            print(f"Sin aumentos en {name}.")
             
     except Exception as e:
         print(f"Error al revisar {name}: {e}")
