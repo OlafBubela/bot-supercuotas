@@ -11,49 +11,42 @@ BOOKMAKER_CONFIG = {
     "Winamax": {
         "url": "https://www.winamax.es/supercuotas",
         "keywords": ["supercuota", "momo boost", "cuota mejorada"],
-        "card_selector": "div[class*='SuperCuota'], div[class*='boost'], .slider-item, article",
-        "img_selector": "img[src*='supercuotas'], img[src*='boost'], div[class*='SuperCuota'] img"
+        "card_selector": "div[class*='SuperCuota'], div[class*='boost'], div[class*='card'], article"
     },
     "Betfair": {
         "url": "https://www.betfair.es/sport/promotions",
         "keywords": ["supercuota", "combi del día"],
-        "card_selector": ".promotion-tile, .avb-col",
-        "img_selector": ".promotion-tile img"
+        "card_selector": ".promotion-tile, .avb-col"
     },
     "Casino Gran Madrid": {
         "url": "https://www.casinogranmadridonline.es/apuestas-deportivas",
         "keywords": ["supercuota cgm", "mega cuota"],
-        "card_selector": "[class*='boost'], [class*='promo']",
-        "img_selector": "[class*='boost'] img"
+        "card_selector": "[class*='boost'], [class*='promo']"
     },
     "Paf": {
         "url": "https://www.paf.es/bets",
         "keywords": ["paf boost", "supertabla"],
-        "card_selector": "[class*='boost']",
-        "img_selector": "[class*='boost'] img"
+        "card_selector": "[class*='boost']"
     },
     "Betway": {
         "url": "https://betway.es/es/sports",
         "keywords": ["betway boost"],
-        "card_selector": ".boostCard, [class*='boost']",
-        "img_selector": ".boostCard img"
+        "card_selector": ".boostCard, [class*='boost']"
     },
     "Interwetten": {
         "url": "https://www.interwetten.es/es/apuestas-deportivas",
         "keywords": ["supercuota interwetten", "cuota top"],
-        "card_selector": "[class*='boost']",
-        "img_selector": "[class*='boost'] img"
+        "card_selector": "[class*='boost']"
     },
     "Bwin": {
         "url": "https://sports.bwin.es/es/sports",
         "keywords": ["price boost", "supercuota bwin"],
-        "card_selector": "[class*='price-boost']",
-        "img_selector": "[class*='price-boost'] img"
+        "card_selector": "[class*='price-boost']"
     }
 }
 
 async def send_telegram_alert(text, image_path=None):
-    """Envía la alerta con la imagen exacta a Telegram."""
+    """Envía la alerta a Telegram con el formato exacto."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     
     if image_path and os.path.exists(image_path):
@@ -74,19 +67,30 @@ async def send_telegram_alert(text, image_path=None):
             payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
             await session.post(text_url, json=payload)
 
-def parse_odds_and_value(text_content):
-    """Extrae las cuotas y calcula el valor en porcentaje exacto."""
+def parse_card_info(text_content):
+    """Extrae evento, hora, mercado, cuotas y porcentaje exactos."""
+    lines = [line.strip() for line in text_content.split('\n') if len(line.strip()) > 2]
+    
+    # Extraer horas (ej: 20:45, 18:00, etc.)
+    time_match = re.search(r'\b\d{1,2}:\d{2}\b', text_content)
+    time_str = f" (Hoy {time_match.group(0)})" if time_match else ""
+    
+    match_title = lines[0] if lines else "Evento"
+    market_description = lines[1] if len(lines) > 1 else "Apuesta especial"
+    
+    # Buscar números decimales (cuotas)
     numbers = re.findall(r'\b\d+[\.,]\d+\b', text_content)
     numbers = [float(n.replace(',', '.')) for n in numbers if float(n.replace(',', '.')) > 1.01]
     
+    odds_str = ""
     if len(numbers) >= 2:
         cuota_old = min(numbers[:2])
         cuota_new = max(numbers[:2])
         if cuota_old < cuota_new:
             val_pct = ((cuota_new - cuota_old) / cuota_old) * 100
-            return cuota_old, cuota_new, round(val_pct, 2)
+            odds_str = f"*{cuota_old:.2f}* ➡️ *{cuota_new:.2f}* (*{val_pct:.2f}%*)"
             
-    return None, None, None
+    return match_title, time_str, market_description, odds_str
 
 async def check_bookmaker(page, name, config):
     print(f"Escaneando {name}...")
@@ -94,57 +98,44 @@ async def check_bookmaker(page, name, config):
     keywords = config["keywords"]
     
     try:
-        await page.goto(url, timeout=45000, wait_until="domcontentloaded")
-        await asyncio.sleep(4)
+        await page.goto(url, timeout=45000, wait_until="networkidle")
+        await asyncio.sleep(3)
         
-        # Cerrar banners de cookies
+        # Ocultar cookies
         try:
-            cookie_btn = await page.query_selector("button:has-text('Aceptar'), button:has-text('Accept'), #onetrust-accept-btn-handler")
+            cookie_btn = await page.query_selector("button:has-text('Aceptar'), #onetrust-accept-btn-handler")
             if cookie_btn:
                 await cookie_btn.click()
                 await asyncio.sleep(1)
         except Exception:
             pass
 
-        card_el = await page.query_selector(config["card_selector"])
-        
         content = await page.content()
         content_lower = content.lower()
-        found_matches = [term for term in keywords if term in content_lower]
+        found = any(kw in content_lower for kw in keywords)
         
-        if found_matches or card_el:
+        if found:
             print(f"AUMENTO DETECTADO en {name}")
             
-            card_text = await card_el.inner_text() if card_el else ""
-            lines = [l.strip() for l in card_text.split('\n') if len(l.strip()) > 2]
+            card_el = await page.query_selector(config["card_selector"])
+            card_text = await card_el.inner_text() if card_el else await page.inner_text("body")
             
-            event_title = lines[0] if lines else "Evento con Supercuota"
-            market_detail = lines[1] if len(lines) > 1 else "Supercuota disponible"
+            match_title, time_str, market_desc, odds_str = parse_card_info(card_text)
             
-            cuota_old, cuota_new, val_pct = parse_odds_and_value(card_text)
-            
-            if cuota_old and cuota_new:
-                odds_str = f"`{cuota_old:.2f}` ➡️ `{cuota_new:.2f}` (`{val_pct}%`)"
-            else:
-                odds_str = "Consulte las cuotas en la plataforma"
-
             filename = f"aumento_{name.lower()}.png"
             
-            # Buscar la imagen/banner directo de la supercuota
-            img_element = await page.query_selector(config["img_selector"])
-            if img_element:
-                await img_element.screenshot(path=filename)
-            elif card_el:
+            # Recorte exacto a la tarjeta del banner
+            if card_el:
                 await card_el.screenshot(path=filename)
             else:
-                await page.screenshot(path=filename, clip={"x": 200, "y": 150, "width": 880, "height": 500})
-            
-            # Formato idéntico al de tu ejemplo
+                body = await page.query_selector("main") or await page.query_selector("body")
+                await body.screenshot(path=filename, clip={"x": 250, "y": 150, "width": 780, "height": 450})
+
+            # FORMATO EXACTO A LA IMAGEN DE EJEMPLO
             caption = (
-                f"⚽ *{event_title}*\n"
-                f"*{market_detail}*\n"
-                f"{odds_str}\n\n"
-                f"🔗 [Ir a la apuesta]({url})"
+                f"⚽ *{match_title}*{time_str}\n"
+                f"{market_desc}\n"
+                f"{odds_str}"
             )
             
             await send_telegram_alert(caption, filename)
